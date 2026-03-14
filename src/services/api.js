@@ -22,13 +22,23 @@
 
 import axios from 'axios'
 
-const USE_MOCK = true  // ← SET TO false WHEN BACKEND IS READY
+const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false'
 
 const client = axios.create({
-  baseURL: '/api',
+  baseURL: import.meta.env.VITE_API_URL || '/api',
   timeout: 30000,
   headers: { 'Content-Type': 'application/json' }
 })
+
+client.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('swarm_token');
+    }
+    return Promise.reject(error);
+  }
+)
 
 // ─── MOCK DATA ────────────────────────────────────────────────────────
 
@@ -82,6 +92,32 @@ const delay = (ms = 800) => new Promise(r => setTimeout(r, ms))
 // ─── API FUNCTIONS ────────────────────────────────────────────────────
 
 export const api = {
+  // Auth
+  setToken: (token) => {
+    if (token) {
+      client.defaults.headers.common['Authorization'] = `Bearer ${token}`
+    } else {
+      delete client.defaults.headers.common['Authorization']
+    }
+  },
+  login: async ({ username, password }) => {
+    if (USE_MOCK) { await delay(500); return { access_token: 'mock-token' } }
+    const { data } = await client.post('/auth/login', { username, password }, {
+      headers: { 'Content-Type': 'application/json' }
+    });
+    return data;
+  },
+  register: async (userData) => {
+    if (USE_MOCK) { await delay(500); return { email: userData.email, username: userData.username } }
+    const { data } = await client.post('/auth/register', userData)
+    return data
+  },
+  getMe: async () => {
+    if (USE_MOCK) { await delay(300); return { username: 'testuser', role: 'admin' } }
+    const { data } = await client.get('/auth/me')
+    return data
+  },
+
   // Dashboard stats
   getStats: async () => {
     if (USE_MOCK) { await delay(400); return MOCK_STATS }
@@ -107,33 +143,101 @@ export const api = {
   getEvents: async () => {
     if (USE_MOCK) { await delay(300); return { events: MOCK_EVENTS } }
     const { data } = await client.get('/events')
-    return data
+    // If backend returns array directly, wrap it in an object to match the mock structure
+    return Array.isArray(data) ? { events: data } : data;
   },
 
   createEvent: async (payload) => {
     if (USE_MOCK) { await delay(800); return { event: { id: Date.now().toString(), ...payload, status: 'planning', participants: 0 } } }
-    const { data } = await client.post('/events', payload)
+    
+    // Construct ISO Strings from date and time fields
+    const start_date = new Date(`${payload.start_date}T${payload.start_time}:00`).toISOString();
+    const end_date = new Date(`${payload.end_date}T${payload.end_time}:00`).toISOString();
+    
+    const backendPayload = {
+      name: payload.name,
+      description: payload.description || undefined,
+      event_type: payload.event_type || undefined,
+      theme: payload.theme || undefined,
+      target_audience: payload.target_audience || undefined,
+      start_date,
+      end_date,
+      location: payload.location || undefined,
+      venue: payload.venue || undefined,
+      max_participants: payload.max_participants ? parseInt(payload.max_participants, 10) : undefined,
+      event_metadata: {
+        speaker: payload.speaker || undefined
+      }
+    };
+    
+    const { data } = await client.post('/events', backendPayload)
+    return { event: data }
+  },
+
+  // Participants
+  uploadCSV: async (event_id, file) => {
+    if (USE_MOCK) { await delay(500); return { participants: [] } }
+    const formData = new FormData()
+    formData.append('file', file)
+    const { data } = await client.post(`/participants/upload-csv?event_id=${event_id}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
     return data
   },
 
   // Content agent
   generateContent: async ({ brief, event_name, audience }) => {
     if (USE_MOCK) { await delay(2000); return { posts: MOCK_POSTS, copy: `Promotional copy generated for ${event_name}. Ready to queue.` } }
-    const { data } = await client.post('/agents/content/generate', { brief, event_name, audience })
+    const { data } = await client.post('/agents/marketing/generate', { brief, event_name, audience })
     return data
   },
 
   // Email agent
-  sendEmails: async ({ event_id, template, csv_data }) => {
+  prepareEmails: async ({ event_id, template, csv_data }) => {
     if (USE_MOCK) { await delay(2500); return { sent: 342, failed: 3 } }
-    const { data } = await client.post('/agents/email/send', { event_id, template, csv_data })
+    const { data } = await client.post('/agents/email/prepare', { event_id, email_template: template, subject: "Event Update" })
+    return data
+  },
+
+  sendPreparedEmails: async ({ event_id, emails }) => {
+    if (USE_MOCK) { await delay(1500); return { sent: emails.length, failed: 0 } }
+    const { data } = await client.post('/agents/email/send', { event_id, emails })
+    return data
+  },
+
+  selectEmailVariations: async ({ event_id, selected_variations }) => {
+    if (USE_MOCK) { await delay(1500); return { prepared: 25, emails_prepared: [] } }
+    const { data } = await client.post('/agents/email/select-variations', { event_id, selected_variations })
+    return data
+  },
+
+  // Orchestrator endpoints
+  orchestratorExecuteAgent: async (eventId, agentType) => {
+    if (USE_MOCK) { await delay(2000); return { status: 'completed', agent: agentType, message: `${agentType} executed`, results: {} } }
+    const { data } = await client.post(`/agents/orchestrator/event/${eventId}/execute-agent/${agentType}`)
+    return data
+  },
+
+  orchestratorEventSummary: async (eventId) => {
+    if (USE_MOCK) { 
+      await delay(500)
+      return {
+        event: { id: eventId, name: 'Event', participants_count: 50 },
+        agent_logs: [],
+        emails: { total: 0, sent: 0, pending: 0, failed: 0, recent: [] },
+        marketing: { total_posts: 0, by_platform: {}, published: 0, recent: [] },
+        schedule: { total_sessions: 0, recent: [] },
+        analytics: { reports_generated: 0, recent: [] }
+      }
+    }
+    const { data } = await client.get(`/agents/orchestrator/event/${eventId}/summary`)
     return data
   },
 
   // Scheduler agent
   buildSchedule: async ({ event_id, constraints, sessions }) => {
     if (USE_MOCK) { await delay(1800); return { schedule: MOCK_SCHEDULE } }
-    const { data } = await client.post('/agents/schedule/build', { event_id, constraints, sessions })
+    const { data } = await client.post('/agents/schedule/generate', { event_id, constraints, sessions })
     return data
   },
 
