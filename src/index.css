@@ -1,0 +1,86 @@
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:ital,wght@0,300;0,400;0,500;0,600;1,300&family=JetBrains+Mono:wght@300;400;500&display=swap');
+
+:root {
+  --accent:      #E8FF47;
+  --accent-low:  rgba(232,255,71,0.08);
+  --accent-mid:  rgba(232,255,71,0.18);
+  --bg:          #080809;
+  --bg-1:        #0F0F11;
+  --bg-2:        #161618;
+  --bg-3:        #1D1D20;
+  --border:      rgba(255,255,255,0.055);
+  --border-2:    rgba(255,255,255,0.09);
+  --text-1:      #EFEFEF;
+  --text-2:      #7A7A85;
+  --text-3:      #3E3E48;
+  --green:       #3DCC78;
+  --amber:       #F5A623;
+  --red:         #EF5050;
+  --blue:        #5B9CF6;
+  --font-d:      'Bebas Neue', sans-serif;
+  --font-b:      'Inter', sans-serif;
+  --font-m:      'JetBrains Mono', monospace;
+  --ease:        cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
+body {
+  background: var(--bg);
+  color: var(--text-1);
+  font-family: var(--font-b);
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-x: hidden;
+  cursor: none;
+}
+* { cursor: none !important; }
+
+/* ─── CUSTOM CURSOR ─── */
+#cursor-dot   { position:fixed; width:6px; height:6px; background:var(--accent); border-radius:50%; pointer-events:none; z-index:99999; transform:translate(-50%,-50%); transition:transform 0.1s, width 0.2s, height 0.2s; mix-blend-mode:difference; }
+#cursor-ring  { position:fixed; width:32px; height:32px; border:1px solid rgba(232,255,71,0.5); border-radius:50%; pointer-events:none; z-index:99998; transform:translate(-50%,-50%); transition:transform 0.35s var(--ease), width 0.3s, height 0.3s, border-color 0.2s; }
+#cursor-dot.expanded  { width:10px; height:10px; }
+#cursor-ring.expanded { width:56px; height:56px; border-color:rgba(232,255,71,0.3); }
+#cursor-ring.text-mode { width:72px; height:72px; background:rgba(232,255,71,0.06); border-color:rgba(232,255,71,0.2); }
+
+::-webkit-scrollbar { width:2px; }
+::-webkit-scrollbar-track { background:var(--bg); }
+::-webkit-scrollbar-thumb { background:var(--bg-3); }
+
+button, a { cursor: none !important; }
+input, textarea, select { font-family: var(--font-m); outline: none; cursor: none !important; }
+a { text-decoration: none; color: inherit; }
+
+/* ─── REVEAL ANIMATIONS ─── */
+.reveal { opacity:0; transform:translateY(40px); transition:opacity 0.8s var(--ease), transform 0.8s var(--ease); }
+.reveal.visible { opacity:1; transform:translateY(0); }
+.reveal-left  { opacity:0; transform:translateX(-40px); transition:opacity 0.8s var(--ease), transform 0.8s var(--ease); }
+.reveal-left.visible  { opacity:1; transform:translateX(0); }
+.reveal-right { opacity:0; transform:translateX(40px); transition:opacity 0.8s var(--ease), transform 0.8s var(--ease); }
+.reveal-right.visible { opacity:1; transform:translateX(0); }
+
+.stagger-1 { transition-delay:0.1s; }
+.stagger-2 { transition-delay:0.2s; }
+.stagger-3 { transition-delay:0.3s; }
+.stagger-4 { transition-delay:0.4s; }
+.stagger-5 { transition-delay:0.5s; }
+.stagger-6 { transition-delay:0.6s; }
+
+/* ─── CHAR ANIMATION ─── */
+.char-wrap { overflow: hidden; display: inline-block; }
+.char      { display: inline-block; transform: translateY(110%); transition: transform 0.6s var(--ease); }
+.char.visible { transform: translateY(0); }
+
+/* ─── MAGNETIC ─── */
+.magnetic { transition: transform 0.4s var(--ease); display: inline-block; }
+
+/* ─── TICKER ─── */
+@keyframes ticker-l { from{transform:translateX(0)} to{transform:translateX(-50%)} }
+@keyframes ticker-r { from{transform:translateX(-50%)} to{transform:translateX(0)} }
+@keyframes pulse    { 0%,100%{opacity:1}50%{opacity:0.3} }
+@keyframes spin     { to{transform:rotate(360deg)} }
+@keyframes float    { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
+@keyframes scanline { 0%{top:-10%} 100%{top:110%} }
+
+.page-enter { animation: pg-enter 0.5s var(--ease) both; }
+@keyframes pg-enter { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
