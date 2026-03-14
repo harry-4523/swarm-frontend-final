@@ -14,7 +14,13 @@ export default function Events() {
   const [creating, setCreating] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [showAgentMenu, setShowAgentMenu] = useState(false)
-  const [form, setForm] = useState({ name:'', date:'', time:'', speaker:'', description:'' })
+  const initialFormState = { 
+    name:'', description:'', event_type:'', theme:'', 
+    target_audience:'', start_date:'', start_time:'',
+    end_date:'', end_time:'', location:'', venue:'', max_participants:'', speaker:'' 
+  }
+  const [form, setForm] = useState(initialFormState)
+
   const [agentTasksAssigned, setAgentTasksAssigned] = useState(false)
   const navigate = useNavigate()
 
@@ -31,13 +37,13 @@ export default function Events() {
   }, [isAgentExecuting, showAgentMenu, agentTasksAssigned])
 
   const create = async () => {
-    if (!form.name || !form.date || !form.time || !form.speaker) { toast.error('Name, date, time and speaker required'); return }
+    if (!form.name || !form.start_date || !form.start_time || !form.end_date || !form.end_time) { toast.error('Name and Event Times are required'); return }
     setCreating(true)
     try { 
       const d = await api.createEvent(form)
       setEvents(e => [...e, d.event])
       setShowForm(false)
-      setForm({ name:'', date:'', time:'', speaker:'', description:'' })
+      setForm(initialFormState)
       setSelectedEvent(d.event.id)
       toast.success('Event created')
     }
@@ -88,20 +94,64 @@ export default function Events() {
               <Input placeholder="TechSummit 2026" value={form.name} onChange={e => setForm(f=>({...f,name:e.target.value}))} />
             </div>
             <div>
-              <Label>Date *</Label>
-              <Input type="date" value={form.date} onChange={e => setForm(f=>({...f,date:e.target.value}))} />
+              <Label>Event Type</Label>
+              <Input placeholder="Conference, Hackathon..." value={form.event_type} onChange={e => setForm(f=>({...f,event_type:e.target.value}))} />
+            </div>
+            
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <div>
+                <Label>Start Date *</Label>
+                <Input type="date" value={form.start_date} onChange={e => setForm(f=>({...f,start_date:e.target.value}))} />
+              </div>
+              <div>
+                <Label>Start Time *</Label>
+                <Input type="time" value={form.start_time} onChange={e => setForm(f=>({...f,start_time:e.target.value}))} />
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <div>
+                <Label>End Date *</Label>
+                <Input type="date" value={form.end_date} onChange={e => setForm(f=>({...f,end_date:e.target.value}))} />
+              </div>
+              <div>
+                <Label>End Time *</Label>
+                <Input type="time" value={form.end_time} onChange={e => setForm(f=>({...f,end_time:e.target.value}))} />
+              </div>
+            </div>
+
+            <div>
+              <Label>Theme</Label>
+              <Input placeholder="AI, Future of Tech..." value={form.theme} onChange={e => setForm(f=>({...f,theme:e.target.value}))} />
             </div>
             <div>
-              <Label>Timing *</Label>
-              <Input type="time" value={form.time} onChange={e => setForm(f=>({...f,time:e.target.value}))} />
+              <Label>Target Audience</Label>
+              <Input placeholder="Developers, Students..." value={form.target_audience} onChange={e => setForm(f=>({...f,target_audience:e.target.value}))} />
+            </div>
+
+            <div>
+              <Label>Location (City/Online)</Label>
+              <Input placeholder="Delhi / Virtual" value={form.location} onChange={e => setForm(f=>({...f,location:e.target.value}))} />
             </div>
             <div>
-              <Label>Speaker *</Label>
+              <Label>Venue / Building</Label>
+              <Input placeholder="Convention Center" value={form.venue} onChange={e => setForm(f=>({...f,venue:e.target.value}))} />
+            </div>
+
+            <div>
+              <Label>Max Participants</Label>
+              <Input type="number" placeholder="500" value={form.max_participants} onChange={e => setForm(f=>({...f,max_participants:e.target.value}))} />
+            </div>
+            <div>
+              <Label>Main Speaker</Label>
               <Input placeholder="Speaker name" value={form.speaker} onChange={e => setForm(f=>({...f,speaker:e.target.value}))} />
             </div>
           </div>
-          <Label>Description</Label>
-          <textarea style={{ ...S.input, height:72 }} placeholder="Brief description..." value={form.description} onChange={e => setForm(f=>({...f,description:e.target.value}))} />
+          
+          <div style={{ marginTop: 4 }}>
+            <Label>Description</Label>
+            <textarea style={{ ...S.input, height:72 }} placeholder="Brief description..." value={form.description} onChange={e => setForm(f=>({...f,description:e.target.value}))} />
+          </div>
+          
           <button style={{ ...S.newBtn, opacity: creating ? 0.5 : 1, marginTop: 16 }} onClick={create} disabled={creating}>{creating ? 'Creating...' : 'Create Event →'}</button>
         </div>
       )}
@@ -125,10 +175,10 @@ export default function Events() {
                   >
                     <h4 style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{ev.name}</h4>
                     <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>
-                      {new Date(ev.date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: '2-digit' })}
+                      {new Date(ev.start_date || ev.date || Date.now()).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: '2-digit' })}
                     </div>
                     <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>
-                      {ev.time || 'Time TBA'} • {ev.speaker && `Speaker: ${ev.speaker}`}
+                      {new Date(ev.start_date || ev.date || Date.now()).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })} • {ev.event_type || 'Event'}
                     </div>
                   </div>
                 )

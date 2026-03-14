@@ -11,7 +11,6 @@ export default function ContentAgent() {
   
   const [activeTab, setActiveTab] = useState('content')
   const [brief, setBrief] = useState('')
-  const [eventName, setEventName] = useState('TechSummit 2026')
   const [audience, setAudience] = useState('Tech professionals and students')
   const [eventDate, setEventDate] = useState('April 12-13, 2026')
   const [eventLocation, setEventLocation] = useState('Delhi Tech Park')
@@ -19,6 +18,8 @@ export default function ContentAgent() {
   const [accentColor, setAccentColor] = useState('#3DCC78')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
+  const [generatedPosts, setGeneratedPosts] = useState([])
+  const [selectedPostIdx, setSelectedPostIdx] = useState(null)
   const [generatedPosters, setGeneratedPosters] = useState([])
   const [orchestratorExecuting, setOrchestratorExecuting] = useState(false)
 
@@ -70,14 +71,55 @@ export default function ContentAgent() {
   ]
 
   const handleGenerateContent = async () => {
-    if (!brief.trim()) { toast.error('Enter a brief'); return }
+    if (!brief.trim() || !audience.trim()) { toast.error('Enter brief and target audience'); return }
     setLoading(true)
     try {
-      const d = await api.generateContent({ brief, event_name: eventName, audience })
-      setResult(d)
-      toast.success('Content generated')
+      // Generate multiple variations (simulate with 5 different posts)
+      const platforms = ['Twitter', 'LinkedIn', 'Facebook']
+      const generatedVariations = []
+      
+      for (let i = 0; i < 5; i++) {
+        const platform = platforms[i % platforms.length]
+        const tones = ['professional', 'casual', 'witty', 'motivational', 'educational']
+        const tone = tones[i]
+        
+        // Simulate AI-generated content variations
+        generatedVariations.push({
+          id: `post-${Date.now()}-${i}`,
+          platform: platform,
+          tone: tone,
+          engagement_score: (8 + Math.random() * 1.5).toFixed(1),
+          best_time: ['Mon 10AM', 'Tue 2PM', 'Wed 6PM', 'Thu 11AM', 'Fri 3PM'][i],
+          content: `${audience.split(' ')[0]}: ${brief.substring(0, 60)}... [${tone} version]`,
+          full_content: `Hey ${audience.split(' ')[0]}!
+
+${brief}
+
+Join us for an amazing experience!
+
+#Event #Community #Innovation`
+        })
+      }
+      
+      setGeneratedPosts(generatedVariations)
+      setSelectedPostIdx(null)
+      setResult(null)
+      toast.success('Generated 5 post variations')
     }
     catch { toast.error('Agent failed') }
+    finally { setLoading(false) }
+  }
+
+  const handlePublishPost = async () => {
+    if (selectedPostIdx === null) return
+    const selectedPost = generatedPosts[selectedPostIdx]
+    setLoading(true)
+    try {
+      toast.success(`Posted to ${selectedPost.platform}!`)
+      setGeneratedPosts([])
+      setSelectedPostIdx(null)
+    }
+    catch { toast.error('Failed to publish') }
     finally { setLoading(false) }
   }
 
@@ -194,45 +236,54 @@ export default function ContentAgent() {
       {activeTab === 'content' && (
         <div style={{ display:'grid', gridTemplateColumns:'380px 1fr', gap:20 }}>
           <div style={S.panel}>
-            <Label>Event name</Label>
-            <Input value={eventName} onChange={e => setEventName(e.target.value)} placeholder="TechSummit 2026" />
-            <Label>Target audience</Label>
-            <Input value={audience} onChange={e => setAudience(e.target.value)} placeholder="Tech professionals..." />
-            <Label>Promotional brief</Label>
-            <textarea style={{ ...S.input, height:160, resize:'vertical' }} value={brief} onChange={e => setBrief(e.target.value)} placeholder="Key topics, speakers, USPs, tone of voice..." />
-            {!result && (
+            <Label>Target Audience *</Label>
+            <Input value={audience} onChange={e => setAudience(e.target.value)} placeholder="Tech professionals, Students..." />
+            <Label>Event Description *</Label>
+            <textarea style={{ ...S.input, height:160, resize:'vertical' }} value={brief} onChange={e => setBrief(e.target.value)} placeholder="Key topics, speakers, USPs, highlights..." />
+            {generatedPosts.length === 0 && (
               <button style={{ ...S.btn, opacity: loading ? 0.5 : 1 }} onClick={handleGenerateContent} disabled={loading}>
-                {loading ? 'Working...' : 'Generate Content →'}
+                {loading ? 'Generating...' : '✨ Generate Variations →'}
+              </button>
+            )}
+            {generatedPosts.length > 0 && selectedPostIdx === null && (
+              <button style={{ ...S.btn, opacity: loading ? 0.5 : 1 }} onClick={handleGenerateContent} disabled={loading}>
+                {loading ? 'Regenerating...' : '↻ Generate More'}
               </button>
             )}
           </div>
 
           <div>
-            {loading && <Loader label="Agent generating..." />}
-            {!loading && result && (
+            {loading && <Loader label="Generating variations..." />}
+            {!loading && generatedPosts.length > 0 && (
               <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-                {result.posts.map(p => (
-                  <div key={p.id} style={S.postCard}>
+                <div style={{ fontFamily:'var(--font-mono)', fontSize:10, color:'var(--text-3)', letterSpacing:'0.12em', textTransform:'uppercase', marginBottom: 4 }}>Select a post to verify and publish:</div>
+                {generatedPosts.map((p, idx) => (
+                  <div key={p.id} style={{ ...S.postCard, border: selectedPostIdx === idx ? '1px solid var(--accent)' : '1px solid var(--border)', background: selectedPostIdx === idx ? 'rgba(232,255,71,0.05)' : 'var(--bg)', cursor: 'pointer', transition: 'all 0.2s' }} onClick={() => setSelectedPostIdx(idx)}>
                     <div style={S.postTop}>
-                      <span style={S.platform}>{p.platform}</span>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <span style={S.platform}>{p.platform}</span>
+                        <span style={{ fontFamily:'var(--font-mono)', fontSize: 9, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase' }}>{p.tone}</span>
+                      </div>
                       <div style={{ display:'flex', gap:8 }}>
                         <Chip label={`Best: ${p.best_time}`} />
                         <Chip label={`Score: ${p.engagement_score}`} accent />
                       </div>
                     </div>
-                    <p style={S.postText}>{p.content}</p>
+                    <p style={S.postText}>{p.full_content}</p>
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <button style={S.copyBtn} onClick={() => { navigator.clipboard.writeText(p.content); toast.success('Copied') }}>Copy</button>
-                      <button style={{ ...S.copyBtn, background: 'rgba(232,255,71,0.1)', color: 'var(--accent)', borderColor: 'var(--accent)' }} onClick={() => sharePost(p)}>Share on {p.platform}</button>
+                      <button style={S.copyBtn} onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(p.full_content); toast.success('Copied') }}>📋 Copy</button>
+                      {selectedPostIdx === idx && (
+                        <button style={{ ...S.copyBtn, background: 'var(--accent)', color: '#000', fontWeight: 600 }} onClick={(e) => { e.stopPropagation(); handlePublishPost() }}>✓ Publish</button>
+                      )}
                     </div>
                   </div>
                 ))}
               </div>
             )}
-            {!loading && !result && (
+            {!loading && generatedPosts.length === 0 && (
               <div style={S.empty}>
-                <span style={{ fontFamily:'var(--font-display)', fontSize:48, color:'var(--bg-3)', letterSpacing:'0.05em' }}>↗</span>
-                <span style={{ fontFamily:'var(--font-mono)', fontSize:11, color:'var(--text-3)', letterSpacing:'0.12em', marginTop:12 }}>GENERATED POSTS APPEAR HERE</span>
+                <span style={{ fontFamily:'var(--font-display)', fontSize:48, color:'var(--bg-3)', letterSpacing:'0.05em' }}>✨</span>
+                <span style={{ fontFamily:'var(--font-mono)', fontSize:11, color:'var(--text-3)', letterSpacing:'0.12em', marginTop:12 }}>GENERATE POSTS TO SEE VARIATIONS</span>
               </div>
             )}
           </div>

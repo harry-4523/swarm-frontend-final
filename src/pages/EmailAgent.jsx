@@ -7,15 +7,20 @@ import toast from 'react-hot-toast'
 import Papa from 'papaparse'
 
 export default function EmailAgent() {
-  const { orchestratorTask, completeAgentTask, failAgentTask, agentState } = useSwarm()
+  const { activeEvent, orchestratorTask, completeAgentTask, failAgentTask, agentState } = useSwarm()
   const executedTaskRef = useRef(null)
   
   const [activeTab, setActiveTab] = useState('send')
-  const [template, setTemplate] = useState(`Dear {{name}},\n\nYou're registered for {{event_name}} on {{date}} at {{venue}}.\n\nTrack: {{track}} — Seat: {{seat}}\n\nSee you there.\n\n— The SWARM Team`)
+  const [template, setTemplate] = useState(`Dear {{full_name}},\n\nYou're registered for {{event_name}} on {{date}}.\n\nRole: {{role}} — Organization: {{organization}}\n\nSee you there.\n\n— The SWARM Team`)
   const [csvData, setCsvData] = useState(null)
+  const [rawFile, setRawFile] = useState(null)
   const [preview, setPreview] = useState([])
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
+  const [preparedEmails, setPreparedEmails] = useState(null)
+  const [lastEventId, setLastEventId] = useState(null)
+  const [templateVariations, setTemplateVariations] = useState(null)
+  const [selectedVariations, setSelectedVariations] = useState({})
   const [orchestratorExecuting, setOrchestratorExecuting] = useState(false)
   const ref = useRef()
 
@@ -51,18 +56,89 @@ export default function EmailAgent() {
 
   const handleCSV = e => {
     const f = e.target.files[0]; if (!f) return
+    setRawFile(f);
     Papa.parse(f, { header:true, complete: ({ data }) => { setCsvData(data); setPreview(data.slice(0,3)); toast.success(`${data.length} participants loaded`) }, error: () => toast.error('Parse failed') })
   }
 
-  const handle = async () => {
-    if (!csvData) { toast.error('Upload a CSV first'); return }
+const handlePrepare = async () => {
+    if (!csvData && !rawFile) { toast.error('Upload a CSV first'); return }
+    let eventId = activeEvent?.id;
+    if (!eventId) {
+      try {
+        const d = await api.getEvents();
+        if (d.events?.length > 0) { eventId = d.events[d.events.length - 1].id; }
+        else { toast.error('No events found, please create an event first'); return; }
+      } catch (e) {
+        toast.error('Failed to retrieve active event'); return;
+      }
+    }
+    
     setLoading(true)
-    try { const d = await api.sendEmails({ event_id:'1', template, csv_data: csvData }); setResult(d); toast.success(`${d.sent} emails dispatched`) }
-    catch { toast.error('Agent failed') }
+    try { 
+      // Upload CSV file first
+      await api.uploadCSV(eventId, rawFile);
+      
+      // Dispatch email agent to PREPARE (not send immediately)
+      const d = await api.prepareEmails({ event_id: eventId, template, csv_data: csvData });
+      if (d?.results?.template_variations || d?.results?.emails_prepared) {
+        if (d?.results?.template_variations) {
+          setTemplateVariations(d.results.template_variations);
+          setSelectedVariations({});
+        }
+        setPreparedEmails(d.results.emails_prepared);
+        setLastEventId(eventId);
+        toast.success(d?.message || 'Emails prepared for review') 
+      } else {
+        toast.error('No emails were prepared');
+      }
+    }
+    catch (err) { toast.error('Agent failed'); console.error(err); }
     finally { setLoading(false) }
   }
 
-  const VARS = ['{{name}}','{{event_name}}','{{date}}','{{venue}}','{{track}}','{{seat}}']
+  const handleConfirmVariations = async () => {
+    if (!Object.keys(selectedVariations).length) {
+      toast.error('Please select at least one variation');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const d = await api.selectEmailVariations({
+        event_id: lastEventId || activeEvent?.id,
+        selected_variations: selectedVariations
+      });
+
+      if (d?.results?.emails_prepared) {
+        setPreparedEmails(d.results.emails_prepared);
+        setTemplateVariations(null);
+        toast.success('Emails regenerated with your selected variations');
+      } else {
+        toast.error('Failed to regenerate emails');
+      }
+    } catch (err) {
+      toast.error('Failed to apply variations');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const handleSend = async () => {
+    if (!preparedEmails || preparedEmails.length === 0) return;
+    
+    setLoading(true)
+    try {
+      const d = await api.sendPreparedEmails({ event_id: lastEventId || activeEvent?.id, emails: preparedEmails });
+      setResult(d);
+      setPreparedEmails(null); // Clear prepared after send
+      toast.success(d?.message || 'Emails sent successfully')
+    }
+    catch (err) { toast.error('Failed to send emails'); console.error(err); }
+    finally { setLoading(false) }
+  }
+
+  const VARS = ['{{full_name}}','{{email}}','{{organization}}','{{role}}','{{is_speaker}}','{{is_sponsor}}','{{event_name}}','{{date}}']
 
   return (
     <div>
@@ -94,7 +170,7 @@ export default function EmailAgent() {
               <span style={{ fontSize:13, color: csvData ? 'var(--green)' : 'var(--text-3)', marginTop:8 }}>
                 {csvData ? `${csvData.length} participants loaded` : 'Click to upload CSV'}
               </span>
-              <span style={{ fontFamily:'var(--font-mono)', fontSize:10, color:'var(--text-3)', marginTop:4 }}>name · email · track · seat</span>
+              <span style={{ fontFamily:'var(--font-mono)', fontSize:10, color:'var(--text-3)', marginTop:4 }}>email · full_name · organization · role</span>
             </div>
             <input ref={ref} type="file" accept=".csv" style={{ display:'none' }} onChange={handleCSV} />
             {preview.length > 0 && (
@@ -117,12 +193,87 @@ export default function EmailAgent() {
         <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
           <Section title="2. Email Template">
             <textarea style={{ ...S.textarea, height:220 }} value={template} onChange={e => setTemplate(e.target.value)} />
-            <button style={{ ...S.btn, opacity: loading ? 0.5 : 1 }} onClick={handle} disabled={loading}>
-              {loading ? 'Dispatching...' : 'Send Personalized Emails →'}
-            </button>
+            {!preparedEmails ? (
+              <button style={{ ...S.btn, opacity: loading ? 0.5 : 1 }} onClick={handlePrepare} disabled={loading}>
+                {loading ? 'Preparing Drafts...' : 'Preview Generated Emails →'}
+              </button>
+            ) : null}
           </Section>
 
-          {loading && <Loader label="Personalizing & dispatching..." />}
+          {templateVariations && (
+            <Section title="3. Select Email Variations">
+              {Object.entries(templateVariations).map(([segmentKey, variations]) => (
+                <div key={segmentKey} style={{ marginBottom: 24 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 12, color: 'var(--accent)' }}>
+                    {segmentKey.replace('_', ' ').toUpperCase()}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: variations.length === 3 ? '1fr 1fr 1fr' : '1fr', gap: 12 }}>
+                    {variations.map((variation, idx) => {
+                      // Personalize with sample data for preview
+                      const samplePersonalized = variation
+                        .replace(/\{\{full_name\}\}/g, 'John Smith')
+                        .replace(/\{\{event_name\}\}/g, activeEvent?.name || 'Upcoming Event')
+                        .replace(/\{\{organization\}\}/g, 'Acme Corp')
+                        .replace(/\{\{date\}\}/g, 'April 15, 2026')
+                        .replace(/\{\{role\}\}/g, 'Attendee')
+                      
+                      return (
+                        <div
+                          key={idx}
+                          onClick={() => setSelectedVariations(prev => ({ ...prev, [segmentKey]: idx }))}
+                          style={{
+                            padding: 14,
+                            background: selectedVariations[segmentKey] === idx ? 'rgba(232,255,71,0.1)' : 'rgba(255,255,255,0.02)',
+                            border: selectedVariations[segmentKey] === idx ? '2px solid var(--accent)' : '1px solid rgba(255,255,255,0.05)',
+                            borderRadius: 6,
+                            cursor: 'pointer',
+                            fontSize: 11,
+                            whiteSpace: 'pre-wrap',
+                            maxHeight: 350,
+                            overflowY: 'auto',
+                            lineHeight: 1.6,
+                            color: 'rgba(255,255,255,0.8)'
+                          }}
+                        >
+                          <div style={{ fontSize: 10, color: 'var(--accent)', marginBottom: 10, fontWeight: 600 }}>
+                            Version {idx + 1} (Preview)
+                          </div>
+                          <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)', marginBottom: 10, fontStyle: 'italic' }}>
+                            Sample: variables replaced with demo values
+                          </div>
+                          {samplePersonalized}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+              <button style={{ ...S.btn, marginTop: 16 }} onClick={handleConfirmVariations} disabled={loading}>
+                {loading ? 'Regenerating Emails...' : 'Confirm Selections & Review Emails →'}
+              </button>
+            </Section>
+          )}
+
+          {preparedEmails && !templateVariations && (
+            <Section title={`3. Review Generated Emails (${preparedEmails.length})`}>
+              <div style={{ maxHeight: 300, overflowY: 'auto', marginBottom: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {preparedEmails.map((email, idx) => (
+                  <div key={idx} style={{ padding: 10, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 4 }}>
+                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>To: {email.recipient_email}</div>
+                    <div style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}>{email.body_text}</div>
+                  </div>
+                ))}
+              </div>
+              <button style={{ ...S.btn, background: '#3DCC78', color: '#000', opacity: loading ? 0.5 : 1 }} onClick={handleSend} disabled={loading}>
+                {loading ? 'Sending...' : 'Approve & Send Emails Now'}
+              </button>
+              <button style={{ ...S.btn, background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', marginTop: 8 }} onClick={() => setPreparedEmails(null)} disabled={loading}>
+                Cancel & Re-edit
+              </button>
+            </Section>
+          )}
+
+          {loading && <Loader label="Processing..." />}
         </div>
       </div>
       )}

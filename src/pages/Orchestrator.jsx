@@ -1,77 +1,123 @@
 import { useState, useEffect } from 'react'
+import { api } from '../services/api'
 import { useSwarm } from '../context/SwarmContext'
 import PageHeader from '../components/PageHeader'
 import toast from 'react-hot-toast'
 
 export default function Orchestrator() {
-  const { orchestratorTask, sendTaskToAllAgents, executingAgents, agentState, activeEvent, updateOrchestratorEventState } = useSwarm()
-  const [activeTab, setActiveTab] = useState('overview')
-  const [loading, setLoading] = useState(false)
-  
-  // Event state that can be modified
-  const [eventState, setEventState] = useState({
-    name: activeEvent?.name || 'TechSummit 2026',
-    date: activeEvent?.date || 'Apr 12–13, 2026',
-    time: '09:00 AM',
-    venue: activeEvent?.venue || 'Delhi Tech Park',
-    capacity: 500
-  })
+  const { agentState, sendTaskToAllAgents } = useSwarm()
+  const [events, setEvents] = useState([])
+  const [selectedEventId, setSelectedEventId] = useState(null)
+  const [activeTab, setActiveTab] = useState('events')
+  const [loading, setLoading] = useState({})
+  const [summary, setSummary] = useState(null)
+  const [summaryLoading, setSummaryLoading] = useState(false)
 
-  const [changes, setChanges] = useState([])
-  const [changedField, setChangedField] = useState(null)
+  // Load events on mount
+  useEffect(() => {
+    const loadEvents = async () => {
+      try {
+        const data = await api.getEvents()
+        const eventsList = Array.isArray(data) ? data : data.events || []
+        setEvents(eventsList)
+        if (eventsList.length > 0 && !selectedEventId) {
+          setSelectedEventId(eventsList[0].id)
+        }
+      } catch (err) {
+        console.error('Failed to load events:', err)
+      }
+    }
+    loadEvents()
+  }, [])
 
-  // Track which agents have responded
-  const agentResponses = {
-    contentAgent: agentState.contentAgent?.history?.length > 0 ? 'Content & Posters Generated' : 'Pending',
-    emailAgent: agentState.emailAgent?.history?.length > 0 ? 'Refresh Email Sent' : 'Pending',
-    schedulerAgent: agentState.schedulerAgent?.history?.length > 0 ? 'Schedule Updated' : 'Pending'
-  }
+  // Load summary when event changes
+  useEffect(() => {
+    if (!selectedEventId) return
+    
+    const loadSummary = async () => {
+      setSummaryLoading(true)
+      try {
+        const data = await api.orchestratorEventSummary(selectedEventId)
+        setSummary(data)
+      } catch (err) {
+        console.error('Failed to load summary:', err)
+      } finally {
+        setSummaryLoading(false)
+      }
+    }
+    
+    loadSummary()
+  }, [selectedEventId])
 
-  const handleFieldChange = (field, value) => {
-    const oldValue = eventState[field]
-    setEventState(prev => ({ ...prev, [field]: value }))
-    updateOrchestratorEventState({ [field]: value })
-    setChangedField(field)
-  }
+  const selectedEvent = events.find(e => e.id === selectedEventId)
 
-  const triggerOrchestrateChange = async () => {
-    if (!changedField) {
-      toast.error('Make a change first')
+  const triggerAgent = async (agentType) => {
+    if (!selectedEvent) {
+      toast.error('Select an event first')
       return
     }
 
-    setLoading(true)
-    const changeType = changedField === 'time' ? 'timing' : changedField === 'venue' ? 'venue' : changedField
-    const changeMessage = `Event ${changeType} changed to ${eventState[changedField]}`
+    setLoading(prev => ({ ...prev, [agentType]: true }))
+    
+    try {
+      const result = await api.orchestratorExecuteAgent(selectedEventId, agentType)
+      
+      if (result.status === 'completed') {
+        toast.success(`✅ ${getAgentLabel(agentType)} executed successfully`)
+        // Reload summary to show new results
+        const data = await api.orchestratorEventSummary(selectedEventId)
+        setSummary(data)
+      } else {
+        toast.error(`Failed to execute ${getAgentLabel(agentType)}`)
+      }
+    } catch (err) {
+      toast.error(`Error: ${err.response?.data?.detail || 'Unknown error'}`)
+      console.error(err)
+    } finally {
+      setLoading(prev => ({ ...prev, [agentType]: false }))
+    }
+  }
+
+  const triggerMultiAgentWorkflow = async () => {
+    if (!selectedEvent) {
+      toast.error('Select an event first')
+      return
+    }
+
+    setLoading(prev => ({ ...prev, workflow: true }))
+    const agents = ['content', 'email', 'scheduler', 'analytics']
 
     try {
-      // Log the change
-      setChanges(prev => [{
-        type: changeType,
-        message: changeMessage,
-        timestamp: new Date().toLocaleTimeString(),
-        id: Date.now()
-      }, ...prev])
-
-      // Send coordinated task to all agents
-      await new Promise(r => setTimeout(r, 500))
-      sendTaskToAllAgents(
-        `Event ${changeType} change detected: ${changeMessage}. Send refresh communications, update schedule, and generate content about this change.`,
-        eventState.name,
-        { 
-          generateContent: true, // Generate content about the CHANGE
-          sendEmail: true,       // Send refresh email
-          scheduleTimeline: true // Update schedule
-        }
-      )
-
-      toast.success('Change detected! All agents coordinating response...')
-      setChangedField(null)
-    } catch (error) {
-      toast.error('Failed to orchestrate change')
+      for (const agent of agents) {
+        await triggerAgent(agent)
+        await new Promise(r => setTimeout(r, 1000))
+      }
+      toast.success('✅ All agents executed successfully!')
+    } catch (err) {
+      toast.error('Some agents failed')
     } finally {
-      setLoading(false)
+      setLoading(prev => ({ ...prev, workflow: false }))
     }
+  }
+
+  const getAgentLabel = (type) => {
+    const labels = {
+      content: 'Content Agent',
+      email: 'Email Agent',
+      scheduler: 'Scheduler Agent',
+      analytics: 'Analytics Agent'
+    }
+    return labels[type] || type
+  }
+
+  const getAgentIcon = (type) => {
+    const icons = {
+      content: '📝',
+      email: '📧',
+      scheduler: '📅',
+      analytics: '📊'
+    }
+    return icons[type] || '🤖'
   }
 
   return (
@@ -79,22 +125,28 @@ export default function Orchestrator() {
       <PageHeader 
         index="05" 
         eyebrow="Orchestrator" 
-        title="COMMAND CENTER" 
-        subtitle="Master coordinator - Monitor event changes and coordinate all agents in real-time." 
+        title="MULTI-EVENT COMMAND CENTER" 
+        subtitle="Coordinate all agents across multiple events. Agent actions are tracked and stored in the database." 
       />
 
       <div style={S.tabs}>
         <button 
-          style={{ ...S.tab, ...(activeTab === 'overview' ? S.tabActive : {}) }}
-          onClick={() => setActiveTab('overview')}
+          style={{ ...S.tab, ...(activeTab === 'events' ? S.tabActive : {}) }}
+          onClick={() => setActiveTab('events')}
         >
-          Overview
+          Events ({events.length})
         </button>
         <button 
-          style={{ ...S.tab, ...(activeTab === 'changes' ? S.tabActive : {}) }}
-          onClick={() => setActiveTab('changes')}
+          style={{ ...S.tab, ...(activeTab === 'workflow' ? S.tabActive : {}) }}
+          onClick={() => setActiveTab('workflow')}
         >
-          Changes ({changes.length})
+          Workflow
+        </button>
+        <button 
+          style={{ ...S.tab, ...(activeTab === 'results' ? S.tabActive : {}) }}
+          onClick={() => setActiveTab('results')}
+        >
+          Results & Tracking
         </button>
         <button 
           style={{ ...S.tab, ...(activeTab === 'agents' ? S.tabActive : {}) }}
@@ -104,130 +156,251 @@ export default function Orchestrator() {
         </button>
       </div>
 
-      {/* Overview Tab - Event Control */}
-      {activeTab === 'overview' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
-          {/* Event Details Panel */}
+      {/* Events Tab */}
+      {activeTab === 'events' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 24 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <Section title="Event Details">
-              <div style={S.fieldGroup}>
-                <Label>Event Name</Label>
-                <Input 
-                  value={eventState.name} 
-                  onChange={e => handleFieldChange('name', e.target.value)}
-                  disabled={loading}
-                />
-              </div>
-
-              <div style={S.fieldGroup}>
-                <Label>Date</Label>
-                <Input 
-                  value={eventState.date} 
-                  onChange={e => handleFieldChange('date', e.target.value)}
-                  disabled={loading}
-                />
-              </div>
-
-              <div style={S.fieldGroup}>
-                <Label>Time *</Label>
-                <Input 
-                  type="time" 
-                  value={eventState.time.split(' ')[0]} 
-                  onChange={e => handleFieldChange('time', e.target.value + ' AM')}
-                  disabled={loading}
-                />
-              </div>
-
-              <div style={S.fieldGroup}>
-                <Label>Venue *</Label>
-                <Input 
-                  value={eventState.venue} 
-                  onChange={e => handleFieldChange('venue', e.target.value)}
-                  disabled={loading}
-                />
-              </div>
-
-              <div style={S.fieldGroup}>
-                <Label>Capacity</Label>
-                <Input 
-                  type="number"
-                  value={eventState.capacity} 
-                  onChange={e => handleFieldChange('capacity', e.target.value)}
-                  disabled={loading}
-                />
-              </div>
-
-              <button 
-                onClick={triggerOrchestrateChange}
-                disabled={!changedField || loading}
-                style={{ ...S.triggerBtn, opacity: !changedField || loading ? 0.5 : 1 }}
-              >
-                {loading ? 'Coordinating...' : changedField ? `📡 Broadcast Change: ${changedField}` : 'Make a change to trigger coordination'}
-              </button>
+            <Section title="📋 All Events">
+              {events.length === 0 ? (
+                <div style={S.emptyMessage}>No events created yet</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {events.map(event => (
+                    <div
+                      key={event.id}
+                      onClick={() => setSelectedEventId(event.id)}
+                      style={{
+                        ...S.eventCard,
+                        borderColor: selectedEventId === event.id ? 'var(--accent)' : 'var(--border)',
+                        background: selectedEventId === event.id ? 'rgba(232,255,71,0.05)' : 'rgba(255,255,255,0.01)',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <div style={{ fontSize: 12, fontWeight: 600 }}>{event.name}</div>
+                      <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)', marginTop: 4 }}>
+                        {event.participants || 0} participants
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </Section>
           </div>
 
-          {/* Agent Response Panel */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <Section title="Agent Coordination">
-              <div style={S.agentStatus}>
-                <div style={S.agentStatusIcon}>📝</div>
+          {selectedEvent && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <Section title={`🎯 ${selectedEvent.name} - Quick Actions`}>
                 <div>
-                  <div style={S.agentStatusTitle}>Content Agent</div>
-                  <div style={S.agentStatusDesc}>{agentResponses.contentAgent}</div>
+                  <div style={S.fieldLabel}>Event Details</div>
+                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', marginTop: 8 }}>
+                    {selectedEvent.participants || 0} participants • {new Date(selectedEvent.start_date).toLocaleDateString()}
+                  </div>
                 </div>
-              </div>
 
-              <div style={S.agentStatus}>
-                <div style={S.agentStatusIcon}>📧</div>
-                <div>
-                  <div style={S.agentStatusTitle}>Email Agent</div>
-                  <div style={S.agentStatusDesc}>{agentResponses.emailAgent}</div>
+                <div style={{ marginTop: 16 }}>
+                  <div style={S.fieldLabel}>Execute Individual Agents</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 10 }}>
+                    {['content', 'email', 'scheduler', 'analytics'].map(agent => (
+                      <button
+                        key={agent}
+                        onClick={() => triggerAgent(agent)}
+                        disabled={loading[agent]}
+                        style={{ 
+                          ...S.agentBtn,
+                          opacity: loading[agent] ? 0.6 : 1
+                        }}
+                      >
+                        {loading[agent] ? '⏳' : getAgentIcon(agent)} {agent}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-
-              <div style={S.agentStatus}>
-                <div style={S.agentStatusIcon}>📅</div>
-                <div>
-                  <div style={S.agentStatusTitle}>Scheduler Agent</div>
-                  <div style={S.agentStatusDesc}>{agentResponses.schedulerAgent}</div>
-                </div>
-              </div>
-
-              <div style={{ ...S.flowCard, marginTop: 16 }}>
-                <div style={S.flowLabel}>COORDINATION FLOW</div>
-                <div style={S.flowStep}>1 You change time/venue</div>
-                <div style={S.flowStep}>2 Orchestrator detects change</div>
-                <div style={S.flowStep}>3 Content Agent → Creates posts about change + new posters</div>
-                <div style={S.flowStep}>4 Email Agent → Sends refresh email to all participants</div>
-                <div style={S.flowStep}>5 Scheduler Agent → Updates timeline and resolves conflicts</div>
-              </div>
-            </Section>
-          </div>
+              </Section>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Changes Tab */}
-      {activeTab === 'changes' && (
+      {/* Workflow Tab */}
+      {activeTab === 'workflow' && (
         <div>
-          {changes.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {changes.map(change => (
-                <div key={change.id} style={S.changeCard}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <div style={S.changeBadge}>{change.type === 'timing' ? '⏰' : change.type === 'venue' ? '📍' : '✏️'}</div>
-                    <div style={{ flex: 1 }}>
-                      <div style={S.changeTitle}>{change.message}</div>
-                      <div style={S.changeTime}>{change.timestamp}</div>
+          {selectedEvent ? (
+            <Section title={`⚡ Full Orchestration - ${selectedEvent.name}`}>
+              <div style={S.workflowCard}>
+                <div style={S.workflowTitle}>Execute All Agents in Sequence</div>
+                <div style={S.workflowDesc}>Content → Email → Schedule → Analytics (All results saved to database)</div>
+                
+                <div style={{ marginTop: 20, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+                  {['content', 'email', 'scheduler', 'analytics'].map((agent, idx) => (
+                    <div key={agent} style={S.workflowStep}>
+                      <div style={S.stepIcon}>{idx + 1}️⃣</div>
+                      <div style={S.stepName}>{getAgentIcon(agent)} {agent}</div>
+                      <div style={S.stepDesc}>
+                        {agent === 'content' && 'Posts & Posters'}
+                        {agent === 'email' && 'Email Campaigns'}
+                        {agent === 'scheduler' && 'Event Timeline'}
+                        {agent === 'analytics' && 'Insights'}
+                      </div>
                     </div>
-                  </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+
+                <button
+                  onClick={triggerMultiAgentWorkflow}
+                  disabled={loading.workflow}
+                  style={{ ...S.orchestrateBtn, opacity: loading.workflow ? 0.6 : 1 }}
+                >
+                  {loading.workflow ? '⏳ Orchestrating...' : '▶️ Launch Full Workflow'}
+                </button>
+              </div>
+            </Section>
           ) : (
             <div style={S.empty}>
-              <div style={{ fontSize: 32, marginBottom: 12 }}>📢</div>
-              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>No changes detected yet. Modify event details to trigger coordination.</div>
+              <div style={{ fontSize: 32, marginBottom: 12 }}>🎯</div>
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>Select an event to execute workflow</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Results & Tracking Tab */}
+      {activeTab === 'results' && (
+        <div>
+          {selectedEvent ? (
+            summaryLoading ? (
+              <div style={S.empty}>
+                <div style={{ fontSize: 24, marginBottom: 12 }}>⏳</div>
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>Loading results...</div>
+              </div>
+            ) : summary ? (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
+                {/* Agent Logs */}
+                <Section title="🔍 Agent Execution History">
+                  {summary.agent_logs && summary.agent_logs.length > 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 300, overflowY: 'auto' }}>
+                      {summary.agent_logs.map((log, idx) => (
+                        <div key={idx} style={{ padding: 10, background: 'rgba(255,255,255,0.01)', borderRadius: 4, border: '1px solid var(--border)' }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>
+                            {log.status === 'completed' ? '✅' : '❌'} {log.agent_name}
+                          </div>
+                          <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)' }}>
+                            {new Date(log.created_at).toLocaleString()}
+                          </div>
+                          {log.outputs && Object.keys(log.outputs).length > 0 && (
+                            <div style={{ fontSize: 9, color: 'var(--accent)', marginTop: 6 }}>
+                              {Object.entries(log.outputs).map(([k, v]) => (
+                                <div key={k}>{k}: {v}</div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={S.emptyMessage}>No executions yet</div>
+                  )}
+                </Section>
+
+                {/* Email Tracking */}
+                <Section title="📧 Email Tracking">
+                  {summary.emails ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={S.metricRow}>
+                        <span>Total Emails:</span>
+                        <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{summary.emails.total || 0}</span>
+                      </div>
+                      <div style={S.metricRow}>
+                        <span>✅ Sent:</span>
+                        <span style={{ color: '#3DCC78' }}>{summary.emails.sent || 0}</span>
+                      </div>
+                      <div style={S.metricRow}>
+                        <span>⏳ Pending:</span>
+                        <span style={{ color: 'var(--warn)' }}>{summary.emails.pending || 0}</span>
+                      </div>
+                      <div style={S.metricRow}>
+                        <span>❌ Failed:</span>
+                        <span style={{ color: '#FF6B6B' }}>{summary.emails.failed || 0}</span>
+                      </div>
+                      {summary.emails.recent && summary.emails.recent.length > 0 && (
+                        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)', fontSize: 9 }}>
+                          <div style={{ fontWeight: 600, marginBottom: 6, color: 'var(--text-2)' }}>Recent Emails:</div>
+                          {summary.emails.recent.map((email, idx) => (
+                            <div key={idx} style={{ marginBottom: 6, color: 'rgba(255,255,255,0.6)', fontSize: 8 }}>
+                              <div>{email.recipient_email}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={S.emptyMessage}>No email data</div>
+                  )}
+                </Section>
+
+                {/* Marketing Posts */}
+                <Section title="📝 Marketing Content">
+                  {summary.marketing ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={S.metricRow}>
+                        <span>Total Posts:</span>
+                        <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{summary.marketing.total_posts || 0}</span>
+                      </div>
+                      <div style={S.metricRow}>
+                        <span>Published:</span>
+                        <span style={{ color: '#3DCC78' }}>{summary.marketing.published || 0}</span>
+                      </div>
+                      {Object.keys(summary.marketing.by_platform || {}).length > 0 && (
+                        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)', fontSize: 9 }}>
+                          <div style={{ fontWeight: 600, marginBottom: 6, color: 'var(--text-2)' }}>By Platform:</div>
+                          {Object.entries(summary.marketing.by_platform).map(([platform, count]) => (
+                            <div key={platform} style={S.metricRow}>
+                              <span>{platform}:</span>
+                              <span>{count}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={S.emptyMessage}>No marketing data</div>
+                  )}
+                </Section>
+
+                {/* Schedule */}
+                <Section title="📅 Schedule">
+                  {summary.schedule ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={S.metricRow}>
+                        <span>Sessions:</span>
+                        <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{summary.schedule.total_sessions || 0}</span>
+                      </div>
+                      {summary.schedule.recent && summary.schedule.recent.length > 0 && (
+                        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)', fontSize: 9, maxHeight: 150, overflowY: 'auto' }}>
+                          <div style={{ fontWeight: 600, marginBottom: 6, color: 'var(--text-2)' }}>Recent Sessions:</div>
+                          {summary.schedule.recent.map((session, idx) => (
+                            <div key={idx} style={{ marginBottom: 6, color: 'rgba(255,255,255,0.6)', fontSize: 8 }}>
+                              <div>{session.session_name}</div>
+                              <div style={{ color: 'rgba(255,255,255,0.4)' }}>{session.room}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={S.emptyMessage}>No schedule data</div>
+                  )}
+                </Section>
+              </div>
+            ) : (
+              <div style={S.empty}>
+                <div style={{ fontSize: 32, marginBottom: 12 }}>📊</div>
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>No data available</div>
+              </div>
+            )
+          ) : (
+            <div style={S.empty}>
+              <div style={{ fontSize: 32, marginBottom: 12 }}>🎯</div>
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>Select an event to view results</div>
             </div>
           )}
         </div>
@@ -235,77 +408,28 @@ export default function Orchestrator() {
 
       {/* Agent Status Tab */}
       {activeTab === 'agents' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-          {/* Content Agent Status */}
-          <div style={S.agentCard}>
-            <div style={S.agentCardHeader}>
-              <span style={{ fontSize: 20 }}>📝</span>
-              <span>Content Agent</span>
-            </div>
-            <div style={{ marginTop: 16 }}>
-              <div style={S.metricRow}>
-                <span>Status:</span>
-                <span style={{ color: agentState.contentAgent?.history?.length > 0 ? '#3DCC78' : 'rgba(255,255,255,0.4)' }}>
-                  {agentState.contentAgent?.history?.length > 0 ? 'Active' : 'Idle'}
-                </span>
+        <div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 16 }}>
+            {['content', 'email', 'scheduler', 'analytics'].map(agentType => (
+              <div key={agentType} style={S.coordCard}>
+                <div style={{ fontSize: 20, marginBottom: 12 }}>{getAgentIcon(agentType)}</div>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{getAgentLabel(agentType)}</div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginBottom: 16 }}>
+                  {agentType === 'content' && 'Generates marketing content & social posts'}
+                  {agentType === 'email' && 'Sends personalized email campaigns'}
+                  {agentType === 'scheduler' && 'Builds event schedules & resolves conflicts'}
+                  {agentType === 'analytics' && 'Analyzes engagement & provides insights'}
+                </div>
+                
+                <button
+                  onClick={() => triggerAgent(agentType)}
+                  disabled={loading[agentType]}
+                  style={{ ...S.agentExecuteBtn, opacity: loading[agentType] ? 0.6 : 1 }}
+                >
+                  {loading[agentType] ? 'Executing...' : 'Execute Now'}
+                </button>
               </div>
-              <div style={S.metricRow}>
-                <span>Tasks Completed:</span>
-                <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{agentState.contentAgent?.history?.length || 0}</span>
-              </div>
-              <div style={S.metricRow}>
-                <span>Role:</span>
-                <span><small>Generates content about changes + posters</small></span>
-              </div>
-            </div>
-          </div>
-
-          {/* Email Agent Status */}
-          <div style={S.agentCard}>
-            <div style={S.agentCardHeader}>
-              <span style={{ fontSize: 20 }}>📧</span>
-              <span>Email Agent</span>
-            </div>
-            <div style={{ marginTop: 16 }}>
-              <div style={S.metricRow}>
-                <span>Status:</span>
-                <span style={{ color: agentState.emailAgent?.history?.length > 0 ? '#3DCC78' : 'rgba(255,255,255,0.4)' }}>
-                  {agentState.emailAgent?.history?.length > 0 ? 'Active' : 'Idle'}
-                </span>
-              </div>
-              <div style={S.metricRow}>
-                <span>Tasks Completed:</span>
-                <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{agentState.emailAgent?.history?.length || 0}</span>
-              </div>
-              <div style={S.metricRow}>
-                <span>Role:</span>
-                <span><small>Sends refresh emails on changes</small></span>
-              </div>
-            </div>
-          </div>
-
-          {/* Scheduler Agent Status */}
-          <div style={S.agentCard}>
-            <div style={S.agentCardHeader}>
-              <span style={{ fontSize: 20 }}>📅</span>
-              <span>Scheduler Agent</span>
-            </div>
-            <div style={{ marginTop: 16 }}>
-              <div style={S.metricRow}>
-                <span>Status:</span>
-                <span style={{ color: agentState.schedulerAgent?.history?.length > 0 ? '#3DCC78' : 'rgba(255,255,255,0.4)' }}>
-                  {agentState.schedulerAgent?.history?.length > 0 ? 'Active' : 'Idle'}
-                </span>
-              </div>
-              <div style={S.metricRow}>
-                <span>Tasks Completed:</span>
-                <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{agentState.schedulerAgent?.history?.length || 0}</span>
-              </div>
-              <div style={S.metricRow}>
-                <span>Role:</span>
-                <span><small>Updates schedule & resolves conflicts</small></span>
-              </div>
-            </div>
+            ))}
           </div>
         </div>
       )}
@@ -315,37 +439,38 @@ export default function Orchestrator() {
 
 const Section = ({ title, children }) => (
   <div style={{ background:'var(--bg-1)', border:'1px solid var(--border)', padding:'20px', borderRadius:'var(--radius)', display:'flex', flexDirection:'column', gap:16 }}>
-    <div style={{ fontSize:11, fontWeight:600, color:'var(--text-3)', letterSpacing:'0.15em', textTransform:'uppercase' }}>{title}</div>
+    <div style={{ fontSize:11, fontWeight:600, color:'var(--text-3)', letterSpacing:'0.15em', textTransform:'uppercase', display:'flex', alignItems:'center', gap:6 }}>{title}</div>
     {children}
   </div>
 )
 
-const Label = ({ children }) => (
-  <span style={{ fontSize:10, color:'var(--text-3)', letterSpacing:'0.12em', textTransform:'uppercase', display:'block', marginBottom:6 }}>{children}</span>
-)
-
-const Input = (props) => <input style={S.input} {...props} />
-
 const S = {
-  tabs: { display: 'flex', gap: 2, marginBottom: 32, borderBottom: '1px solid var(--border)', paddingBottom: 12 },
-  tab: { padding: '8px 16px', background: 'transparent', border: 'none', fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.4)', cursor: 'pointer', borderBottom: '2px solid transparent', transition: 'all 0.2s' },
-  tabActive: { color: 'var(--text-1)', borderBottomColor: 'var(--accent)' },
-  fieldGroup: { display: 'flex', flexDirection: 'column', gap: 6 },
-  input: { background:'var(--bg)', border:'1px solid var(--border-2)', padding:'10px 12px', color:'var(--text-1)', fontSize:13, width:'100%', fontFamily:'var(--font-mono)', borderRadius:'var(--radius)', cursor:'pointer' },
-  triggerBtn: { background:'var(--accent)', color:'#000', padding:'12px 16px', fontSize:12, fontWeight:600, letterSpacing:'0.03em', width:'100%', borderRadius:'var(--radius)', border:'none', cursor:'pointer', marginTop: 8 },
-  agentStatus: { display:'flex', alignItems:'start', gap:12, padding:'12px', background:'var(--bg)', borderRadius:'var(--radius)', border:'1px solid var(--border-2)' },
-  agentStatusIcon: { fontSize:20 },
-  agentStatusTitle: { fontSize:12, fontWeight:600, marginBottom:3 },
-  agentStatusDesc: { fontSize:11, color:'rgba(255,255,255,0.5)' },
-  flowCard: { background:'var(--bg)', border:'1px dashed var(--border)', padding:'12px', borderRadius:'var(--radius)' },
-  flowLabel: { fontSize:9, color:'var(--text-3)', letterSpacing:'0.12em', textTransform:'uppercase', marginBottom:8 },
-  flowStep: { fontSize:11, color:'rgba(255,255,255,0.6)', marginBottom:6, paddingLeft:12, borderLeft:'2px solid var(--accent)' },
-  changeCard: { background:'var(--bg-1)', border:'1px solid var(--border)', padding:'16px', borderRadius:'var(--radius)', borderLeft:'3px solid var(--accent)' },
-  changeBadge: { fontSize:20, display:'flex', alignItems:'center', justifyContent:'center', width:40, height:40, background:'rgba(232, 255, 71, 0.1)', borderRadius:'var(--radius)' },
-  changeTitle: { fontSize:12, fontWeight:600 },
-  changeTime: { fontSize:10, color:'rgba(255,255,255,0.4)', marginTop:4 },
-  agentCard: { background:'var(--bg-1)', border:'1px solid var(--border)', padding:'20px', borderRadius:'var(--radius)' },
-  agentCardHeader: { display:'flex', alignItems:'center', gap:8, fontSize:13, fontWeight:600 },
-  metricRow: { display:'flex', justifyContent:'space-between', padding:'8px 0', fontSize:11, borderBottom:'1px solid var(--border-2)' },
-  empty: { display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:300, border:'1px dashed var(--border)', borderRadius:'var(--radius)' },
+  tabs: { display: 'flex', gap: 2, marginBottom: 32, borderBottom: '1px solid var(--border)', paddingBottom: 12, overflowX: 'auto' },
+  tab: { padding: '8px 16px', background: 'transparent', border: 'none', fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.4)', cursor: 'pointer', borderBottom: '2px solid transparent', transition: 'all 0.2s', whiteSpace: 'nowrap' },
+  tabActive: { color: 'var(--accent)', borderBottomColor: 'var(--accent)' },
+  
+  eventCard: { padding: 12, border: '1px solid var(--border)', borderRadius: 'var(--radius)', cursor: 'pointer', transition: 'all 0.2s' },
+  emptyMessage: { fontSize: 12, color: 'rgba(255,255,255,0.3)', textAlign: 'center', padding: '20px' },
+  
+  fieldLabel: { fontSize: 11, fontWeight: 600, color: 'var(--text-3)', letterSpacing: '0.05em', textTransform: 'uppercase' },
+  fieldValue: { fontSize: 12, fontWeight: 500, marginTop: 6, color: 'var(--accent)' },
+  
+  agentBtn: { padding: '10px 16px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 12, fontWeight: 500, color: 'rgba(255,255,255,0.7)', cursor: 'pointer', transition: 'all 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  
+  workflowCard: { padding: 24, border: '1px solid var(--border)', borderRadius: 'var(--radius)', background: 'rgba(232,255,71,0.02)' },
+  workflowTitle: { fontSize: 14, fontWeight: 600, marginBottom: 6 },
+  workflowDesc: { fontSize: 12, color: 'rgba(255,255,255,0.5)' },
+  workflowStep: { padding: 16, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', textAlign: 'center' },
+  stepIcon: { fontSize: 24, marginBottom: 8 },
+  stepName: { fontSize: 12, fontWeight: 600, marginBottom: 4 },
+  stepDesc: { fontSize: 10, color: 'rgba(255,255,255,0.5)' },
+  
+  orchestrateBtn: { width: '100%', padding: '12px 16px', marginTop: 20, background: 'linear-gradient(135deg, var(--accent) 0%, #fff47f 100%)', border: 'none', borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 600, color: '#000', cursor: 'pointer', transition: 'all 0.2s' },
+  
+  metricRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, color: 'rgba(255,255,255,0.7)' },
+  
+  empty: { padding: '60px 20px', textAlign: 'center', background: 'rgba(255,255,255,0.01)', borderRadius: 'var(--radius)', border: '1px dashed var(--border)' },
+  
+  coordCard: { padding: 16, background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', display: 'flex', flexDirection: 'column' },
+  agentExecuteBtn: { width: '100%', padding: '10px 16px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 12, fontWeight: 500, color: 'rgba(255,255,255,0.7)', cursor: 'pointer', transition: 'all 0.2s', marginTop: 'auto' }
 }

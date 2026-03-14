@@ -1,18 +1,18 @@
 import { Link, useLocation } from 'react-router-dom'
 import { useSwarm } from '../context/SwarmContext'
+import { useAuth } from '../context/AuthContext'
 
 export default function Navbar() {
   const { pathname } = useLocation()
   const { activeEvent, agents } = useSwarm()
+  const { user, logout } = useAuth()
   const activeCount = agents.filter(a => a.status === 'running' || a.status === 'resolving').length
 
   const links = [
     { to: '/', label: 'Overview' },
-    { to: '/agents', label: 'Agents' },
-    { to: '/schedule', label: 'Schedule' },
-    { to: '/content', label: 'Content' },
-    { to: '/emails', label: 'Emails' },
-    { to: '/deploy', label: 'Deploy' },
+    { to: '/events', label: 'Events' },
+    { to: '/orchestrator', label: 'Orchestrator' },
+    { to: '/analysis', label: 'Analysis' },
   ]
 
   return (
@@ -40,11 +40,17 @@ export default function Navbar() {
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{activeEvent.name}</span>
+        {activeEvent && <span style={{ fontSize: 11, color: 'var(--muted)' }}>{activeEvent.name}</span>}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--accent)', padding: '5px 12px', border: '1px solid rgba(200,255,0,0.3)' }}>
           <span style={{ width: 6, height: 6, background: 'var(--accent)', borderRadius: '50%', animation: 'pulse 1.5s infinite' }} />
           {activeCount} active
         </div>
+        {user && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-1)' }}>{user.username}</span>
+            <button onClick={logout} style={{ background: 'transparent', border: '1px solid var(--red)', color: 'var(--red)', padding: '4px 10px', fontSize: 11, borderRadius: 4, cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Logout</button>
+          </div>
+        )}
       </div>
 
       <style>{`@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.7)} }`}</style>
