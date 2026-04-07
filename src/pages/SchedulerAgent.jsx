@@ -9,13 +9,26 @@ export default function SchedulerAgent() {
   const { orchestratorTask, completeAgentTask, failAgentTask, agentState, activeEvent } = useSwarm()
   const executedTaskRef = useRef(null)
   
+  const [events, setEvents] = useState([])
+  const [selectedEventId, setSelectedEventId] = useState('')
   const [activeTab, setActiveTab] = useState('schedule')
   const [startTime, setStartTime] = useState(activeEvent?.time?.split(' ')[0] || '09:00')
   const [venue, setVenue] = useState(activeEvent?.venue || 'Convention Center')
   const [sessions, setSessions] = useState('Opening Keynote - Dr. Arjun Mehta - 60min - Main Hall\nAI in Production - Priya Sharma - 60min - Hall A\nMulti-Agent Systems - Rohan Das - 60min - Hall B\nLunch Break - 90min - Cafeteria\nDevOps at Scale - Sneha Patel - 60min - Hall A\nClosing Panel - All Speakers - 60min - Main Hall')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
+  const [backendSchedule, setBackendSchedule] = useState([])
   const [orchestratorExecuting, setOrchestratorExecuting] = useState(false)
+
+  useEffect(() => {
+    api.getEvents()
+      .then((data) => {
+        const list = Array.isArray(data) ? data : data.events || []
+        setEvents(list)
+        if (list.length > 0) setSelectedEventId(list[0].id)
+      })
+      .catch(() => setEvents([]))
+  }, [])
 
   // Parse sessions into schedule format
   const parseSchedule = (sessionsText, startTimeStr) => {
@@ -51,7 +64,7 @@ export default function SchedulerAgent() {
     return schedule
   }
 
-  const builtSchedule = result ? parseSchedule(sessions, startTime) : []
+  const builtSchedule = backendSchedule.length > 0 ? backendSchedule : (result ? parseSchedule(sessions, startTime) : [])
 
   // Auto-execute when orchestrator sends scheduling task
   useEffect(() => {
@@ -81,11 +94,26 @@ export default function SchedulerAgent() {
 
   const handleBuildSchedule = async () => {
     if (!sessions.trim()) { toast.error('Enter sessions'); return }
+    if (!selectedEventId) { toast.error('Select an event'); return }
     setLoading(true)
     try {
-      await new Promise(r => setTimeout(r, 1500))
-      setResult({ sessions: sessions.split('\n').length, conflicts: 0, notified: 156 })
-      toast.success('Schedule built successfully')
+      const d = await api.buildSchedule({ event_id: selectedEventId })
+      const rawSchedule = d?.results?.schedule || []
+      const scheduleList = Array.isArray(rawSchedule) ? rawSchedule : rawSchedule.sessions || []
+      const conflicts = d?.results?.conflicts || []
+
+      const normalized = scheduleList.map((s, idx) => ({
+        id: s.id || idx,
+        time: s.start_time ? new Date(s.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : startTime,
+        title: s.session_name || s.title || `Session ${idx + 1}`,
+        duration: s.duration_minutes || 60,
+        place: s.room || s.venue || 'TBD',
+        fullText: s.description || ''
+      }))
+
+      setBackendSchedule(normalized)
+      setResult({ sessions: normalized.length, conflicts: conflicts.length, notified: 0 })
+      toast.success('Schedule generated successfully')
     }
     catch { toast.error('Failed to build schedule') }
     finally { setLoading(false) }
@@ -120,6 +148,19 @@ export default function SchedulerAgent() {
       {activeTab === 'schedule' && (
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:20 }}>
           <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+            <Section title="Event">
+              <select
+                style={S.input}
+                value={selectedEventId}
+                onChange={(e) => setSelectedEventId(e.target.value)}
+                disabled={orchestratorExecuting}
+              >
+                {events.length === 0 && <option value="">No events found</option>}
+                {events.map((ev) => (
+                  <option key={ev.id} value={ev.id}>{ev.name}</option>
+                ))}
+              </select>
+            </Section>
             {activeEvent && <div style={{ ...S.eventCard }}>
               <div style={{ fontSize:11, color:'var(--accent)', fontWeight:600 }}>EVENT DETAILS</div>
               <div style={{ fontSize:12, fontWeight:600, marginTop:8 }}>{activeEvent.name}</div>

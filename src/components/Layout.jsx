@@ -5,6 +5,7 @@ import { useReveal } from '../hooks/useReveal'
 
 const NAV = [
   { to:'/events',        label:'Events'       },
+  { to:'/data',          label:'Event Data', controlRoom: true },
   { to:'/content',       label:'Content Agent', controlRoom: true },
   { to:'/email',         label:'Email Agent', controlRoom: true  },
   { to:'/scheduler',     label:'Scheduler', controlRoom: true   },
@@ -16,6 +17,7 @@ export default function Layout() {
   const loc = useLocation()
   const navigate = useNavigate()
   const [time, setTime] = useState(new Date())
+  const apiMode = import.meta.env.VITE_USE_MOCK === 'false' ? 'Live' : 'Mock'
   useCursor()
   useReveal()
   useEffect(() => { const t = setInterval(() => setTime(new Date()), 1000); return () => clearInterval(t) }, [])
@@ -35,7 +37,7 @@ export default function Layout() {
         <nav style={S.nav}>
           <span style={S.navLabel}>Platform</span>
           {NAV.map(({ to, label, controlRoom }) => {
-            const isInControlRoom = loc.pathname.startsWith('/content') || loc.pathname.startsWith('/email') || loc.pathname.startsWith('/scheduler') || loc.pathname.startsWith('/orchestrator')
+            const isInControlRoom = loc.pathname.startsWith('/content') || loc.pathname.startsWith('/email') || loc.pathname.startsWith('/scheduler') || loc.pathname.startsWith('/orchestrator') || loc.pathname.startsWith('/data')
             if (controlRoom && loc.pathname === '/events') return null // Don't show agent links in Events page
             if (controlRoom && !isInControlRoom && loc.pathname !== '/events') return null // Only show if in control room flow or in events
             return (
@@ -49,7 +51,7 @@ export default function Layout() {
           <div style={S.clockLabel}>System Time</div>
           <div style={S.clock}>{time.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })}</div>
           <div style={{ ...S.clockLabel, marginTop:10 }}>API Mode</div>
-          <div style={{ fontFamily:'var(--font-m)', fontSize:11, color:'var(--green)', marginTop:3 }}>Mock</div>
+          <div style={{ fontFamily:'var(--font-m)', fontSize:11, color: apiMode === 'Live' ? 'var(--accent)' : 'var(--green)', marginTop:3 }}>{apiMode}</div>
         </div>
       </aside>
       <main style={S.main} key={loc.pathname} className="page-enter">

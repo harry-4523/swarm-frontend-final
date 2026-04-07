@@ -30,6 +30,23 @@ const client = axios.create({
   headers: { 'Content-Type': 'application/json' }
 })
 
+const resolveLatestEventId = async () => {
+  try {
+    const { data } = await client.get('/events')
+    const events = Array.isArray(data) ? data : data.events || []
+    return events[0]?.id || null
+  } catch {
+    return null
+  }
+}
+
+const toFeedItem = (label, createdAt, color) => ({
+  id: `${label}-${createdAt}`,
+  time: new Date(createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+  color,
+  text: label
+})
+
 client.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -121,22 +138,84 @@ export const api = {
   // Dashboard stats
   getStats: async () => {
     if (USE_MOCK) { await delay(400); return MOCK_STATS }
-    const { data } = await client.get('/stats')
-    return data
+    const eventId = await resolveLatestEventId()
+    if (!eventId) {
+      return { participants: 0, emails_sent: 0, conflicts_resolved: 0, posts_queued: 0 }
+    }
+    const [summaryRes, participantsRes] = await Promise.all([
+      client.get(`/agents/orchestrator/event/${eventId}/summary`),
+      client.get(`/participants/event/${eventId}`)
+    ])
+    const summary = summaryRes.data
+    const participants = Array.isArray(participantsRes.data) ? participantsRes.data.length : 0
+    return {
+      participants,
+      emails_sent: summary.emails?.sent || 0,
+      conflicts_resolved: 0,
+      posts_queued: summary.marketing?.total_posts || 0
+    }
   },
 
   // Agent statuses
   getAgents: async () => {
     if (USE_MOCK) { await delay(300); return { agents: MOCK_AGENTS } }
-    const { data } = await client.get('/agents/status')
-    return data
+    const eventId = await resolveLatestEventId()
+    if (!eventId) return { agents: [] }
+    const { data } = await client.get(`/agents/orchestrator/event/${eventId}/summary`)
+    const latestByAgent = new Map()
+    for (const log of data.agent_logs || []) {
+      if (!latestByAgent.has(log.agent_name)) {
+        latestByAgent.set(log.agent_name, log)
+      }
+    }
+
+    const mapStatus = (status) => {
+      if (status === 'completed') return 'complete'
+      if (status === 'failed') return 'error'
+      return 'running'
+    }
+
+    const agents = [
+      { id: 'content', name: 'Content Strategist Agent', task: 'Marketing content generation' },
+      { id: 'email', name: 'Communications Agent', task: 'Email workflows' },
+      { id: 'scheduler', name: 'Dynamic Scheduler Agent', task: 'Schedule optimization' },
+      { id: 'analytics', name: 'Analytics Agent', task: 'Insights & reports' }
+    ].map((agent) => {
+      const log = latestByAgent.get(agent.name)
+      const status = mapStatus(log?.status || 'idle')
+      return {
+        ...agent,
+        status,
+        progress: status === 'complete' ? 100 : status === 'error' ? 0 : 60,
+        color: status === 'complete' ? '#3DCC78' : status === 'error' ? '#EF5050' : '#E8FF47',
+        icon: '●'
+      }
+    })
+    return { agents }
   },
 
   // Activity feed
   getActivity: async () => {
     if (USE_MOCK) { await delay(300); return { feed: MOCK_ACTIVITY } }
-    const { data } = await client.get('/activity')
-    return data
+    const eventId = await resolveLatestEventId()
+    if (!eventId) return { feed: [] }
+    const { data } = await client.get(`/agents/orchestrator/event/${eventId}/summary`)
+    const feed = []
+
+    for (const log of data.agent_logs || []) {
+      feed.push(toFeedItem(`${log.agent_name} ${log.status}`, log.created_at, '#E8FF47'))
+    }
+    for (const email of data.emails?.recent || []) {
+      feed.push(toFeedItem(`Email ${email.status}: ${email.recipient_email}`, email.created_at, '#ff3cac'))
+    }
+    for (const post of data.marketing?.recent || []) {
+      feed.push(toFeedItem(`Post (${post.platform}): ${post.content}`, post.created_at, '#c8ff00'))
+    }
+    for (const session of data.schedule?.recent || []) {
+      feed.push(toFeedItem(`Session: ${session.session_name}`, session.start_time || new Date().toISOString(), '#3cffd0'))
+    }
+
+    return { feed: feed.slice(0, 12) }
   },
 
   // Events list
@@ -186,16 +265,20 @@ export const api = {
   },
 
   // Content agent
-  generateContent: async ({ brief, event_name, audience }) => {
-    if (USE_MOCK) { await delay(2000); return { posts: MOCK_POSTS, copy: `Promotional copy generated for ${event_name}. Ready to queue.` } }
-    const { data } = await client.post('/agents/marketing/generate', { brief, event_name, audience })
+  generateContent: async ({ event_id, platforms }) => {
+    if (USE_MOCK) { await delay(2000); return { posts: MOCK_POSTS } }
+    const { data } = await client.post('/agents/marketing/generate', { event_id, platforms })
     return data
   },
 
   // Email agent
-  prepareEmails: async ({ event_id, template, csv_data }) => {
+  prepareEmails: async ({ event_id, template, subject }) => {
     if (USE_MOCK) { await delay(2500); return { sent: 342, failed: 3 } }
-    const { data } = await client.post('/agents/email/prepare', { event_id, email_template: template, subject: "Event Update" })
+    const { data } = await client.post('/agents/email/prepare', {
+      event_id,
+      email_template: template,
+      subject: subject || 'Event Update'
+    })
     return data
   },
 
@@ -235,38 +318,71 @@ export const api = {
   },
 
   // Scheduler agent
-  buildSchedule: async ({ event_id, constraints, sessions }) => {
+  buildSchedule: async ({ event_id, optimization_goals }) => {
     if (USE_MOCK) { await delay(1800); return { schedule: MOCK_SCHEDULE } }
-    const { data } = await client.post('/agents/schedule/generate', { event_id, constraints, sessions })
+    const { data } = await client.post('/agents/schedule/generate', { event_id, optimization_goals })
     return data
   },
 
-  resolveConflicts: async ({ event_id, new_constraint }) => {
-    if (USE_MOCK) {
-      await delay(1500)
-      return { schedule: MOCK_SCHEDULE.map(s => ({ ...s, conflict: false })), changes: ['Hall B slot moved from 10:15 to 11:45', 'Participants notified via Email Agent'] }
-    }
-    const { data } = await client.post('/agents/schedule/resolve', { event_id, new_constraint })
+
+  getEventParticipants: async (eventId) => {
+    const { data } = await client.get(`/participants/event/${eventId}`)
     return data
   },
 
-  // Orchestrator agent
-  executeOrchestrator: async ({ instruction, event_name, tasks }) => {
-    if (USE_MOCK) {
-      await delay(3000)
-      return {
-        success: true,
-        emails_sent: 342,
-        events_created: 1,
-        content_pieces: 5,
-        posters_generated: 5,
-        conflicts_resolved: 2,
-        message: `Orchestrator completed all tasks for ${event_name}`
-      }
-    }
-    const { data } = await client.post('/agents/orchestrator/execute', { instruction, event_name, tasks })
+  createParticipant: async (payload) => {
+    const { data } = await client.post('/participants', payload)
     return data
   },
+
+  deleteParticipant: async (participantId) => {
+    const { data } = await client.delete(`/participants/${participantId}`)
+    return data
+  },
+
+  updateParticipant: async (participantId, payload) => {
+    const { data } = await client.put(`/participants/${participantId}`, payload)
+    return data
+  },
+
+  getEventSchedule: async (eventId) => {
+    const { data } = await client.get(`/events/${eventId}/schedule`)
+    return data
+  },
+
+  getEventMarketing: async (eventId) => {
+    const { data } = await client.get(`/events/${eventId}/marketing`)
+    return data
+  },
+
+  getEvent: async (eventId) => {
+    const { data } = await client.get(`/events/${eventId}`)
+    return data
+  },
+
+  updateEvent: async (eventId, payload) => {
+    const { data } = await client.put(`/events/${eventId}`, payload)
+    return data
+  },
+
+  deleteEvent: async (eventId) => {
+    const { data } = await client.delete(`/events/${eventId}`)
+    return data
+  },
+
+  generateAnalytics: async (eventId) => {
+    const { data } = await client.post('/agents/analytics/generate', { event_id: eventId })
+    return data
+  },
+
+  runWorkflow: async (eventId, workflowType, parameters) => {
+    const { data } = await client.post('/agents/workflow/run', {
+      event_id: eventId,
+      workflow_type: workflowType,
+      parameters: parameters || {}
+    })
+    return data
+  }
 }
 
 export default api

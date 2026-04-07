@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { useSwarm } from '../context/SwarmContext'
 import PageHeader from '../components/PageHeader'
+import { api } from '../services/api'
 
 /* ── Animated Counter ── */
 function AnimCounter({ value, duration = 1200 }) {
@@ -272,6 +273,10 @@ function AgentTaskMonitorTable() {
 export default function Analysis() {
   const { agentState } = useSwarm()
   const [mounted, setMounted] = useState(false)
+  const [events, setEvents] = useState([])
+  const [selectedEventId, setSelectedEventId] = useState('')
+  const [analyticsResult, setAnalyticsResult] = useState(null)
+  const [analyticsLoading, setAnalyticsLoading] = useState(false)
 
   // Calculate metrics from dashboard
   const participants = 2847
@@ -283,6 +288,27 @@ export default function Analysis() {
     setTimeout(() => setMounted(true), 50)
   }, [])
 
+  useEffect(() => {
+    api.getEvents()
+      .then((data) => {
+        const list = Array.isArray(data) ? data : data.events || []
+        setEvents(list)
+        if (list.length > 0) setSelectedEventId(list[0].id)
+      })
+      .catch(() => setEvents([]))
+  }, [])
+
+  const handleGenerateAnalytics = async () => {
+    if (!selectedEventId) return
+    setAnalyticsLoading(true)
+    try {
+      const data = await api.generateAnalytics(selectedEventId)
+      setAnalyticsResult(data)
+    } finally {
+      setAnalyticsLoading(false)
+    }
+  }
+
   // Animate top lines after mount
   useEffect(() => {
     if (!mounted) return
@@ -293,6 +319,33 @@ export default function Analysis() {
 
   return (
     <div>
+      <div style={{ marginBottom: 20, background: 'var(--bg-1)', border: '1px solid var(--border)', padding: 16 }}>
+        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginBottom: 8 }}>Analytics Source</div>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <select
+            style={{ ...S.input, maxWidth: 280 }}
+            value={selectedEventId}
+            onChange={(e) => setSelectedEventId(e.target.value)}
+          >
+            {events.length === 0 && <option value="">No events found</option>}
+            {events.map((ev) => (
+              <option key={ev.id} value={ev.id}>{ev.name}</option>
+            ))}
+          </select>
+          <button
+            onClick={handleGenerateAnalytics}
+            disabled={analyticsLoading || !selectedEventId}
+            style={{ ...S.generateBtn, opacity: analyticsLoading ? 0.6 : 1 }}
+          >
+            {analyticsLoading ? 'Generating...' : 'Generate Analytics'}
+          </button>
+        </div>
+        {analyticsResult?.message && (
+          <div style={{ marginTop: 10, fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>
+            {analyticsResult.message}
+          </div>
+        )}
+      </div>
       <PageHeader
         index="06"
         eyebrow="Analysis"
@@ -328,6 +381,35 @@ export default function Analysis() {
         />
       </div>
 
+      {analyticsResult?.results && (
+        <div style={S.analyticsGrid}>
+          <div style={S.cardPanel}>
+            <div style={S.panelTitle}>Insights</div>
+            {analyticsResult.results.insights?.length ? (
+              <ul style={S.panelList}>
+                {analyticsResult.results.insights.map((item, idx) => (
+                  <li key={idx} style={S.panelItem}>{item}</li>
+                ))}
+              </ul>
+            ) : (
+              <div style={S.panelEmpty}>No insights returned yet</div>
+            )}
+          </div>
+          <div style={S.cardPanel}>
+            <div style={S.panelTitle}>Recommendations</div>
+            {analyticsResult.results.recommendations?.length ? (
+              <ul style={S.panelList}>
+                {analyticsResult.results.recommendations.map((item, idx) => (
+                  <li key={idx} style={S.panelItem}>{item}</li>
+                ))}
+              </ul>
+            ) : (
+              <div style={S.panelEmpty}>No recommendations returned yet</div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Agent Task Monitor */}
       <div style={S.monitorContainer}>
         <AgentTaskMonitorTable />
@@ -351,6 +433,14 @@ export default function Analysis() {
 }
 
 const S = {
+  input: { background:'var(--bg)', border:'1px solid var(--border-2)', padding:'10px 12px', color:'var(--text-1)', fontSize:13, width:'100%', fontFamily:'var(--font-mono)', borderRadius:'var(--radius)' },
+  generateBtn: { background:'var(--accent)', color:'#000', padding:'10px 14px', fontSize:12, fontWeight:600, borderRadius:4, border:'none', cursor:'pointer' },
+  analyticsGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 32 },
+  cardPanel: { background: 'var(--bg-1)', border: '1px solid var(--border)', padding: 16 },
+  panelTitle: { fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 },
+  panelList: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 10 },
+  panelItem: { fontSize: 12, color: 'var(--text-2)', lineHeight: 1.6, borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: 8 },
+  panelEmpty: { fontSize: 12, color: 'var(--text-3)', border: '1px dashed var(--border-2)', padding: 12 },
   metricsGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(4, 1fr)',

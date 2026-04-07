@@ -12,6 +12,8 @@ export default function Orchestrator() {
   const [loading, setLoading] = useState({})
   const [summary, setSummary] = useState(null)
   const [summaryLoading, setSummaryLoading] = useState(false)
+  const [workflowType, setWorkflowType] = useState('full')
+  const [workflowParams, setWorkflowParams] = useState('')
 
   // Load events on mount
   useEffect(() => {
@@ -97,6 +99,26 @@ export default function Orchestrator() {
       toast.error('Some agents failed')
     } finally {
       setLoading(prev => ({ ...prev, workflow: false }))
+    }
+  }
+
+  const runBackendWorkflow = async () => {
+    if (!selectedEventId) {
+      toast.error('Select an event first')
+      return
+    }
+
+    setLoading(prev => ({ ...prev, backendWorkflow: true }))
+    try {
+      const parsedParams = workflowParams ? JSON.parse(workflowParams) : {}
+      const result = await api.runWorkflow(selectedEventId, workflowType, parsedParams)
+      toast.success(result.message || 'Workflow completed')
+      const data = await api.orchestratorEventSummary(selectedEventId)
+      setSummary(data)
+    } catch (err) {
+      toast.error('Workflow failed or invalid JSON parameters')
+    } finally {
+      setLoading(prev => ({ ...prev, backendWorkflow: false }))
     }
   }
 
@@ -251,6 +273,36 @@ export default function Orchestrator() {
                   style={{ ...S.orchestrateBtn, opacity: loading.workflow ? 0.6 : 1 }}
                 >
                   {loading.workflow ? '⏳ Orchestrating...' : '▶️ Launch Full Workflow'}
+                </button>
+              </div>
+
+              <div style={{ marginTop: 24, paddingTop: 18, borderTop: '1px solid var(--border)' }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10 }}>Backend Workflow Runner</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 12 }}>
+                  <select
+                    style={S.input}
+                    value={workflowType}
+                    onChange={(e) => setWorkflowType(e.target.value)}
+                  >
+                    <option value="full">full</option>
+                    <option value="marketing">marketing</option>
+                    <option value="email">email</option>
+                    <option value="schedule">schedule</option>
+                    <option value="analytics">analytics</option>
+                  </select>
+                  <textarea
+                    style={{ ...S.input, minHeight: 80 }}
+                    placeholder='Optional JSON parameters (e.g. {"send_immediately": true})'
+                    value={workflowParams}
+                    onChange={(e) => setWorkflowParams(e.target.value)}
+                  />
+                </div>
+                <button
+                  onClick={runBackendWorkflow}
+                  disabled={loading.backendWorkflow}
+                  style={{ ...S.orchestrateBtn, marginTop: 12, opacity: loading.backendWorkflow ? 0.6 : 1 }}
+                >
+                  {loading.backendWorkflow ? '⏳ Running...' : 'Run Backend Workflow'}
                 </button>
               </div>
             </Section>
@@ -445,6 +497,7 @@ const Section = ({ title, children }) => (
 )
 
 const S = {
+  input: { background:'var(--bg)', border:'1px solid var(--border-2)', padding:'10px 12px', color:'var(--text-1)', fontSize:12, width:'100%', fontFamily:'var(--font-mono)', borderRadius:4 },
   tabs: { display: 'flex', gap: 2, marginBottom: 32, borderBottom: '1px solid var(--border)', paddingBottom: 12, overflowX: 'auto' },
   tab: { padding: '8px 16px', background: 'transparent', border: 'none', fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.4)', cursor: 'pointer', borderBottom: '2px solid transparent', transition: 'all 0.2s', whiteSpace: 'nowrap' },
   tabActive: { color: 'var(--accent)', borderBottomColor: 'var(--accent)' },

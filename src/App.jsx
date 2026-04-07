@@ -8,6 +8,7 @@ import SchedulerAgent from './pages/SchedulerAgent'
 import Events from './pages/Events'
 import Orchestrator from './pages/Orchestrator'
 import Analysis from './pages/Analysis'
+import EventData from './pages/EventData'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import { AuthProvider, useAuth } from './context/AuthContext'
@@ -35,6 +36,7 @@ export default function App() {
           <Route path="events"     element={<Events />} />
           <Route path="orchestrator" element={<Orchestrator />} />
           <Route path="analysis" element={<Analysis />} />
+          <Route path="data" element={<EventData />} />
           <Route path="content"    element={<ContentAgent />} />
           <Route path="email"      element={<EmailAgent />} />
           <Route path="scheduler"  element={<SchedulerAgent />} />

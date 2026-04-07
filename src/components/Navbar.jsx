@@ -11,6 +11,7 @@ export default function Navbar() {
   const links = [
     { to: '/', label: 'Overview' },
     { to: '/events', label: 'Events' },
+    { to: '/data', label: 'Event Data' },
     { to: '/orchestrator', label: 'Orchestrator' },
     { to: '/analysis', label: 'Analysis' },
   ]

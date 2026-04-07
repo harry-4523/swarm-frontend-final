@@ -10,6 +10,9 @@ export default function ContentAgent() {
   const executedTaskRef = useRef(null)
   
   const [activeTab, setActiveTab] = useState('content')
+  const [events, setEvents] = useState([])
+  const [selectedEventId, setSelectedEventId] = useState('')
+  const [eventName, setEventName] = useState('')
   const [brief, setBrief] = useState('')
   const [audience, setAudience] = useState('Tech professionals and students')
   const [eventDate, setEventDate] = useState('April 12-13, 2026')
@@ -22,6 +25,20 @@ export default function ContentAgent() {
   const [selectedPostIdx, setSelectedPostIdx] = useState(null)
   const [generatedPosters, setGeneratedPosters] = useState([])
   const [orchestratorExecuting, setOrchestratorExecuting] = useState(false)
+  const [loadingSaved, setLoadingSaved] = useState(false)
+
+  useEffect(() => {
+    api.getEvents()
+      .then((data) => {
+        const list = Array.isArray(data) ? data : data.events || []
+        setEvents(list)
+        if (list.length > 0) {
+          setSelectedEventId(list[0].id)
+          setEventName(list[0].name)
+        }
+      })
+      .catch(() => setEvents([]))
+  }, [])
 
   // ─── LISTEN FOR ORCHESTRATOR TASKS ───
   useEffect(() => {
@@ -71,43 +88,57 @@ export default function ContentAgent() {
   ]
 
   const handleGenerateContent = async () => {
-    if (!brief.trim() || !audience.trim()) { toast.error('Enter brief and target audience'); return }
+    if (!selectedEventId) { toast.error('Select an event first'); return }
     setLoading(true)
     try {
-      // Generate multiple variations (simulate with 5 different posts)
-      const platforms = ['Twitter', 'LinkedIn', 'Facebook']
-      const generatedVariations = []
-      
-      for (let i = 0; i < 5; i++) {
-        const platform = platforms[i % platforms.length]
-        const tones = ['professional', 'casual', 'witty', 'motivational', 'educational']
-        const tone = tones[i]
-        
-        // Simulate AI-generated content variations
-        generatedVariations.push({
-          id: `post-${Date.now()}-${i}`,
-          platform: platform,
-          tone: tone,
-          engagement_score: (8 + Math.random() * 1.5).toFixed(1),
-          best_time: ['Mon 10AM', 'Tue 2PM', 'Wed 6PM', 'Thu 11AM', 'Fri 3PM'][i],
-          content: `${audience.split(' ')[0]}: ${brief.substring(0, 60)}... [${tone} version]`,
-          full_content: `Hey ${audience.split(' ')[0]}!
+      const response = await api.generateContent({ event_id: selectedEventId })
+      const posts = response?.results?.marketing_posts || response?.results?.marketing_plan?.posts || []
+      const normalizedPosts = posts.map((post, index) => ({
+        id: post.id || `post-${Date.now()}-${index}`,
+        platform: post.platform || 'General',
+        tone: 'generated',
+        engagement_score: 'N/A',
+        best_time: 'N/A',
+        content: post.content || '',
+        full_content: post.content || ''
+      }))
 
-${brief}
-
-Join us for an amazing experience!
-
-#Event #Community #Innovation`
-        })
+      if (normalizedPosts.length === 0) {
+        toast.error('No posts generated')
+        return
       }
-      
-      setGeneratedPosts(generatedVariations)
+
+      setGeneratedPosts(normalizedPosts)
       setSelectedPostIdx(null)
       setResult(null)
-      toast.success('Generated 5 post variations')
+      toast.success(`Generated ${normalizedPosts.length} posts`)
     }
     catch { toast.error('Agent failed') }
     finally { setLoading(false) }
+  }
+
+  const handleLoadSavedPosts = async () => {
+    if (!selectedEventId) { toast.error('Select an event first'); return }
+    setLoadingSaved(true)
+    try {
+      const posts = await api.getEventMarketing(selectedEventId)
+      const normalized = (posts || []).map((post, index) => ({
+        id: post.id || `saved-${Date.now()}-${index}`,
+        platform: post.platform || 'General',
+        tone: 'saved',
+        engagement_score: 'N/A',
+        best_time: 'N/A',
+        content: post.content || '',
+        full_content: post.content || ''
+      }))
+      setGeneratedPosts(normalized)
+      setSelectedPostIdx(null)
+      toast.success(`Loaded ${normalized.length} posts`)
+    } catch {
+      toast.error('Failed to load posts')
+    } finally {
+      setLoadingSaved(false)
+    }
   }
 
   const handlePublishPost = async () => {
@@ -236,6 +267,27 @@ Join us for an amazing experience!
       {activeTab === 'content' && (
         <div style={{ display:'grid', gridTemplateColumns:'380px 1fr', gap:20 }}>
           <div style={S.panel}>
+            <Label>Event</Label>
+            <select
+              style={S.input}
+              value={selectedEventId}
+              onChange={(e) => {
+                const id = e.target.value
+                setSelectedEventId(id)
+                const match = events.find((ev) => ev.id === id)
+                setEventName(match?.name || '')
+              }}
+            >
+              {events.length === 0 && <option value="">No events found</option>}
+              {events.map((ev) => (
+                <option key={ev.id} value={ev.id}>{ev.name}</option>
+              ))}
+            </select>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button style={{ ...S.btn, background: 'transparent', border: '1px solid var(--border-2)', color: 'var(--text-2)' }} onClick={handleLoadSavedPosts} disabled={loadingSaved}>
+                {loadingSaved ? 'Loading...' : 'Load Saved Posts'}
+              </button>
+            </div>
             <Label>Target Audience *</Label>
             <Input value={audience} onChange={e => setAudience(e.target.value)} placeholder="Tech professionals, Students..." />
             <Label>Event Description *</Label>

@@ -11,6 +11,8 @@ export default function EmailAgent() {
   const executedTaskRef = useRef(null)
   
   const [activeTab, setActiveTab] = useState('send')
+  const [events, setEvents] = useState([])
+  const [selectedEventId, setSelectedEventId] = useState('')
   const [template, setTemplate] = useState(`Dear {{full_name}},\n\nYou're registered for {{event_name}} on {{date}}.\n\nRole: {{role}} — Organization: {{organization}}\n\nSee you there.\n\n— The SWARM Team`)
   const [csvData, setCsvData] = useState(null)
   const [rawFile, setRawFile] = useState(null)
@@ -23,6 +25,16 @@ export default function EmailAgent() {
   const [selectedVariations, setSelectedVariations] = useState({})
   const [orchestratorExecuting, setOrchestratorExecuting] = useState(false)
   const ref = useRef()
+
+  useEffect(() => {
+    api.getEvents()
+      .then((data) => {
+        const list = Array.isArray(data) ? data : data.events || []
+        setEvents(list)
+        if (list.length > 0) setSelectedEventId(list[0].id)
+      })
+      .catch(() => setEvents([]))
+  }, [])
 
   // ─── LISTEN FOR ORCHESTRATOR TASKS ───
   useEffect(() => {
@@ -62,7 +74,7 @@ export default function EmailAgent() {
 
 const handlePrepare = async () => {
     if (!csvData && !rawFile) { toast.error('Upload a CSV first'); return }
-    let eventId = activeEvent?.id;
+    let eventId = selectedEventId || activeEvent?.id;
     if (!eventId) {
       try {
         const d = await api.getEvents();
@@ -79,7 +91,7 @@ const handlePrepare = async () => {
       await api.uploadCSV(eventId, rawFile);
       
       // Dispatch email agent to PREPARE (not send immediately)
-      const d = await api.prepareEmails({ event_id: eventId, template, csv_data: csvData });
+      const d = await api.prepareEmails({ event_id: eventId, template, subject: 'Event Update' });
       if (d?.results?.template_variations || d?.results?.emails_prepared) {
         if (d?.results?.template_variations) {
           setTemplateVariations(d.results.template_variations);
@@ -165,6 +177,19 @@ const handlePrepare = async () => {
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:20 }}>
         <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
           <Section title="1. Upload CSV">
+            <div style={{ marginBottom: 10 }}>
+              <Label>Event</Label>
+              <select
+                style={S.input}
+                value={selectedEventId}
+                onChange={(e) => setSelectedEventId(e.target.value)}
+              >
+                {events.length === 0 && <option value="">No events found</option>}
+                {events.map((ev) => (
+                  <option key={ev.id} value={ev.id}>{ev.name}</option>
+                ))}
+              </select>
+            </div>
             <div style={S.drop} onClick={() => ref.current.click()}>
               <span style={{ fontSize:24, color:'var(--accent)' }}>⊠</span>
               <span style={{ fontSize:13, color: csvData ? 'var(--green)' : 'var(--text-3)', marginTop:8 }}>
