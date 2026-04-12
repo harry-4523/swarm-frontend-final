@@ -18,7 +18,6 @@ export default function Layout() {
   const navigate = useNavigate()
   const [time, setTime] = useState(new Date())
   const apiMode = import.meta.env.VITE_USE_MOCK === 'true' ? 'Mock' : 'Live'
-  const apiUrl = import.meta.env.VITE_API_URL || '(/api)'
   useCursor()
   useReveal()
   useEffect(() => { const t = setInterval(() => setTime(new Date()), 1000); return () => clearInterval(t) }, [])
@@ -53,8 +52,6 @@ export default function Layout() {
           <div style={S.clock}>{time.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })}</div>
           <div style={{ ...S.clockLabel, marginTop:10 }}>API Mode</div>
           <div style={{ fontFamily:'var(--font-m)', fontSize:11, color: apiMode === 'Live' ? 'var(--accent)' : 'var(--green)', marginTop:3 }}>{apiMode}</div>
-          <div style={{ ...S.clockLabel, marginTop:10 }}>API URL</div>
-          <div style={S.apiUrl}>{apiUrl}</div>
         </div>
       </aside>
       <main style={S.main} key={loc.pathname} className="page-enter">
@@ -83,5 +80,4 @@ const S = {
   sideFooter: { borderTop:'1px solid var(--border)', padding:'18px 20px' },
   clockLabel: { fontFamily:'var(--font-m)', fontSize:9, color:'var(--text-3)', letterSpacing:'0.12em', textTransform:'uppercase' },
   clock: { fontFamily:'var(--font-m)', fontSize:16, color:'var(--accent)', letterSpacing:'0.04em', marginTop:4 },
-  apiUrl: { fontFamily:'var(--font-m)', fontSize:10, color:'var(--text-2)', marginTop:4, wordBreak:'break-all' },
 }
