@@ -17,7 +17,7 @@ export default function Layout() {
   const loc = useLocation()
   const navigate = useNavigate()
   const [time, setTime] = useState(new Date())
-  const apiMode = import.meta.env.VITE_USE_MOCK === 'false' ? 'Live' : 'Mock'
+  const apiMode = import.meta.env.VITE_USE_MOCK === 'true' ? 'Mock' : 'Live'
   useCursor()
   useReveal()
   useEffect(() => { const t = setInterval(() => setTime(new Date()), 1000); return () => clearInterval(t) }, [])

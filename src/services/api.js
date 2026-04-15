@@ -22,7 +22,7 @@
 
 import axios from 'axios'
 
-const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false'
+const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
 
 const client = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api',
